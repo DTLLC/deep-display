@@ -261,10 +261,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func preferredMode(in group: ResolutionGroup) -> DisplayModeSnapshot {
-        if let current = group.modes.first(where: \.isHiDPI) {
-            return group.modes.first(where: { $0.refreshRate == current.refreshRate }) ?? current
-        }
-
         return group.modes.sorted(by: refreshSort).first ?? group.modes[0]
     }
 

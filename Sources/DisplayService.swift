@@ -314,12 +314,19 @@ final class DisplayService: NSObject {
            let requestedModeID = requested.ioDisplayModeID,
            candidateModeID == requestedModeID,
            abs(candidate.refreshRate - requested.refreshRate) < 0.01 {
-            return candidate.width == requested.width && candidate.height == requested.height
+            return candidate.width == requested.width
+                && candidate.height == requested.height
+                && candidate.isHiDPI == requested.isHiDPI
+                && candidate.backingWidth == requested.backingWidth
+                && candidate.backingHeight == requested.backingHeight
         }
 
         return candidate.width == requested.width
             && candidate.height == requested.height
             && abs(candidate.refreshRate - requested.refreshRate) < 0.01
+            && candidate.isHiDPI == requested.isHiDPI
+            && candidate.backingWidth == requested.backingWidth
+            && candidate.backingHeight == requested.backingHeight
             && candidate.source == requested.source
     }
 
