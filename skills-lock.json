@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "git-commit-style-per-feature": {
+      "source": "jascodes/skills",
+      "sourceType": "github",
+      "computedHash": "c3b0605b0b440e16cfe140446261c14ebe56d6f4906a7203b76a38ea783a3dd9"
+    }
+  }
+}
