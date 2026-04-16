@@ -89,9 +89,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                     menu.addItem(.separator())
                     menu.addItem(makeSectionHeaderItem("Range"))
                     for option in display.transportOptions {
-                        let item = NSMenuItem(title: option.title, action: nil, keyEquivalent: "")
+                        let item = NSMenuItem(
+                            title: option.title,
+                            action: option.isUserSelectable ? #selector(applyTransportOption(_:)) : nil,
+                            keyEquivalent: ""
+                        )
+                        item.target = option.isUserSelectable ? self : nil
                         item.state = option.isCurrent ? .on : .off
                         item.isEnabled = option.isUserSelectable
+                        item.representedObject = option.isUserSelectable ? TransportSelection(displayID: display.id, option: option) : nil
                         if let subtitle = option.subtitle {
                             item.toolTip = subtitle
                         }
@@ -207,6 +213,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
+    private func applyTransportOption(_ sender: NSMenuItem) {
+        guard let selection = sender.representedObject as? TransportSelection else { return }
+        do {
+            try displayService.switchTransportOption(selection.option, for: selection.displayID)
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    @objc
     private func savePreset() {
         presetStore.createPreset(named: "Preset \(presetStore.presets.count + 1)", from: displayService.displays)
         rebuildMenu(with: displayService.displays)
@@ -307,6 +323,11 @@ private struct ModeSelection {
 private struct ResolutionSelection {
     let displayID: CGDirectDisplayID
     let group: ResolutionGroup
+}
+
+private struct TransportSelection {
+    let displayID: CGDirectDisplayID
+    let option: DisplayTransportOption
 }
 
 private struct ResolutionGroupKey: Hashable {

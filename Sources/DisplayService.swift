@@ -2,6 +2,8 @@ import AppKit
 import CoreGraphics
 import Darwin
 import Foundation
+import IOKit
+import QuartzCore
 
 private func makeDisplayModeQueryOptions() -> CFDictionary {
     [
@@ -142,6 +144,7 @@ final class DisplayService: NSObject {
 
     private func buildSnapshot(for displayID: CGDirectDisplayID) -> DisplaySnapshot {
         let currentMode = CGDisplayCopyDisplayMode(displayID)
+        let currentSnapshot = currentMode.map(snapshot(for:))
         let availableModes = mergedModeSnapshots(for: displayID)
             .sorted(by: compareModes)
 
@@ -150,9 +153,9 @@ final class DisplayService: NSObject {
             name: displayName(for: displayID),
             isOnline: CGDisplayIsOnline(displayID) != 0,
             frame: DisplayFrame(rect: CGDisplayBounds(displayID)),
-            currentMode: currentMode.map(snapshot(for:)),
+            currentMode: currentSnapshot,
             availableModes: availableModes,
-            transportOptions: transportOptions(for: displayID)
+            transportOptions: transportOptions(for: displayID, currentMode: currentSnapshot)
         )
     }
 
@@ -368,18 +371,29 @@ final class DisplayService: NSObject {
         )
     }
 
-    private func transportOptions(for displayID: CGDirectDisplayID) -> [DisplayTransportOption] {
-        let state = DisplayTransportInspector.inspect(displayID: displayID)
-        guard let state else { return [] }
+    func switchTransportOption(_ option: DisplayTransportOption, for displayID: CGDirectDisplayID) throws {
+        guard option.isUserSelectable else {
+            throw DisplayServiceError.transportOptionNotSettable
+        }
+        guard PrivateDisplayTransportAPI.apply(displayID: displayID, option: option) else {
+            throw DisplayServiceError.transportOptionNotFound
+        }
+        refreshDisplays()
+    }
 
-        return [
-            DisplayTransportOption(
-                title: state.summary,
-                subtitle: state.detail,
-                isCurrent: true,
-                isUserSelectable: false
-            )
-        ]
+    private func transportOptions(
+        for displayID: CGDirectDisplayID,
+        currentMode: DisplayModeSnapshot?
+    ) -> [DisplayTransportOption] {
+        if let privateOptions = PrivateDisplayTransportAPI.inspect(
+            displayID: displayID,
+            targetWidth: currentMode?.width,
+            targetHeight: currentMode?.height
+        ), !privateOptions.isEmpty {
+            return privateOptions
+        }
+
+        return DisplayTransportInspector.inspect(displayID: displayID)
     }
 }
 
@@ -438,7 +452,41 @@ private enum DisplayTransportInspector {
     private typealias DisplayIsHDR10Fn = @convention(c) (UInt64) -> Bool
     private typealias DisplayGetCompositingColorSpaceFn = @convention(c) (UInt64) -> Unmanaged<CGColorSpace>?
 
-    static func inspect(displayID: CGDirectDisplayID) -> TransportState? {
+    static func inspect(displayID: CGDirectDisplayID) -> [DisplayTransportOption] {
+        let currentState = currentTransportState(displayID: displayID)
+        let vendorID = Int(CGDisplayVendorNumber(displayID))
+        let productID = Int(CGDisplayModelNumber(displayID))
+
+        if let registryModes = registryTransportModes(vendorID: vendorID, productID: productID), !registryModes.isEmpty {
+            let dedupedModes = dedupeRegistryModes(registryModes)
+            let currentIndex = currentState.flatMap { state in
+                dedupedModes.firstIndex(where: { $0.title == state.summary })
+            }
+
+            return dedupedModes.enumerated().map { index, mode in
+                DisplayTransportOption(
+                    title: mode.title,
+                    subtitle: mode.detail,
+                    isCurrent: currentIndex == index,
+                    isUserSelectable: false,
+                    modeDescriptor: nil
+                )
+            }
+        }
+
+        guard let currentState else { return [] }
+        return [
+            DisplayTransportOption(
+                title: currentState.summary,
+                subtitle: currentState.detail,
+                isCurrent: true,
+                isUserSelectable: false,
+                modeDescriptor: nil
+            )
+        ]
+    }
+
+    private static func currentTransportState(displayID: CGDirectDisplayID) -> TransportState? {
         let publicColorSpace = CGDisplayCopyColorSpace(displayID)
         let publicName = colorSpaceName(publicColorSpace)
 
@@ -474,6 +522,157 @@ private enum DisplayTransportInspector {
         let detail = activeColorSpaceName.map { "Detected via \(compositingColorSpaceName != nil ? "CoreDisplay" : "CoreGraphics"): \($0)" }
 
         return TransportState(summary: summary, detail: detail)
+    }
+
+    private static func registryTransportModes(vendorID: Int, productID: Int) -> [RegistryTransportMode]? {
+        let serviceNames = ["AppleCLCD2", "AppleDisplay", "IODPDevice"]
+
+        for serviceName in serviceNames {
+            guard let matching = IOServiceMatching(serviceName) else { continue }
+
+            var iterator: io_iterator_t = 0
+            guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else {
+                continue
+            }
+            defer { IOObjectRelease(iterator) }
+
+            var modes: [RegistryTransportMode] = []
+            while case let service = IOIteratorNext(iterator), service != 0 {
+                defer { IOObjectRelease(service) }
+                guard let properties = registryProperties(for: service) else { continue }
+                guard matchesDisplay(properties: properties, vendorID: vendorID, productID: productID) else { continue }
+
+                let colorElements = properties["ColorElements"] as? [[String: Any]]
+                    ?? timingElements(properties: properties).flatMap(extractColorModes(from:))
+                guard let colorElements else { continue }
+
+                modes.append(contentsOf: colorElements.compactMap(registryTransportMode(from:)))
+            }
+
+            if !modes.isEmpty {
+                return modes
+            }
+        }
+
+        return nil
+    }
+
+    private static func registryProperties(for service: io_registry_entry_t) -> [String: Any]? {
+        var properties: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let dictionary = properties?.takeRetainedValue() as? [String: Any] else {
+            return nil
+        }
+        return dictionary
+    }
+
+    private static func matchesDisplay(properties: [String: Any], vendorID: Int, productID: Int) -> Bool {
+        if let displayAttributes = properties["DisplayAttributes"] as? [String: Any],
+           let productAttributes = displayAttributes["ProductAttributes"] as? [String: Any] {
+            let candidateVendor = (productAttributes["LegacyManufacturerID"] as? NSNumber)?.intValue
+                ?? (productAttributes["ManufacturerID"] as? NSNumber)?.intValue
+            let candidateProduct = (productAttributes["ProductID"] as? NSNumber)?.intValue
+            return candidateVendor == vendorID && candidateProduct == productID
+        }
+
+        let candidateVendor = (properties["DisplayVendorID"] as? NSNumber)?.intValue
+        let candidateProduct = (properties["DisplayProductID"] as? NSNumber)?.intValue
+        return candidateVendor == vendorID && candidateProduct == productID
+    }
+
+    private static func timingElements(properties: [String: Any]) -> [[String: Any]]? {
+        properties["TimingElements"] as? [[String: Any]]
+    }
+
+    private static func extractColorModes(from timingElements: [[String: Any]]) -> [[String: Any]]? {
+        timingElements
+            .flatMap { $0["ColorModes"] as? [[String: Any]] ?? [] }
+    }
+
+    private static func registryTransportMode(from element: [String: Any]) -> RegistryTransportMode? {
+        let depth = element[intKey: "Depth"] ?? 0
+        let pixelEncoding = element[intKey: "PixelEncoding"] ?? -1
+        let eotf = element[intKey: "EOTF"] ?? 0
+        let dynamicRange = element[intKey: "DynamicRange"] ?? 0
+        let colorimetry = element[intKey: "Colorimetry"] ?? 0
+        let score = element[intKey: "Score"] ?? 0
+        let isVirtual = element[boolKey: "IsVirtual"] ?? false
+
+        guard let encoding = pixelEncodingDescription(pixelEncoding) else { return nil }
+
+        var parts = ["\(depth)-bit", eotfDescription(eotf), encoding.transport]
+        if let chroma = encoding.chroma {
+            parts.append(chroma)
+        }
+        if let range = rangeDescription(dynamicRange, transport: encoding.transport) {
+            parts.append(range)
+        }
+
+        let detail = "IORegistry ColorElements: pixelEncoding \(pixelEncoding), colorimetry \(colorimetry), \(isVirtual ? "virtual" : "native")"
+        return RegistryTransportMode(
+            title: parts.joined(separator: " - "),
+            detail: detail,
+            score: score,
+            isVirtual: isVirtual
+        )
+    }
+
+    private static func dedupeRegistryModes(_ modes: [RegistryTransportMode]) -> [RegistryTransportMode] {
+        var bestByTitle: [String: RegistryTransportMode] = [:]
+
+        for mode in modes {
+            if let existing = bestByTitle[mode.title] {
+                if mode.score > existing.score || (existing.isVirtual && !mode.isVirtual) {
+                    bestByTitle[mode.title] = mode
+                }
+            } else {
+                bestByTitle[mode.title] = mode
+            }
+        }
+
+        return Array(bestByTitle.values).sorted { lhs, rhs in
+            if lhs.title != rhs.title { return lhs.title > rhs.title }
+            return lhs.score > rhs.score
+        }
+    }
+
+    private static func pixelEncodingDescription(_ value: Int) -> (transport: String, chroma: String?)? {
+        switch value {
+        case 0, 1:
+            return ("RGB", nil)
+        case 2:
+            return ("YCbCr", "4:2:2")
+        case 3:
+            return ("YCbCr", "4:4:4")
+        case 6:
+            return ("YCbCr", "4:2:0")
+        default:
+            return nil
+        }
+    }
+
+    private static func eotfDescription(_ value: Int) -> String {
+        switch value {
+        case 2:
+            return "HDR10"
+        case 3:
+            return "HLG"
+        case 1:
+            return "HDR"
+        default:
+            return "SDR"
+        }
+    }
+
+    private static func rangeDescription(_ value: Int, transport: String) -> String? {
+        switch value {
+        case 0:
+            return "Full Range"
+        case 1:
+            return "Limited Range"
+        default:
+            return transport == "RGB" ? "Unknown Range" : nil
+        }
     }
 
     private static func coreDisplayGetServiceID(_ displayID: CGDirectDisplayID) -> UInt64? {
@@ -535,6 +734,179 @@ private struct TransportState {
     let detail: String?
 }
 
+private struct RegistryTransportMode {
+    let title: String
+    let detail: String
+    let score: Int
+    let isVirtual: Bool
+}
+
+private enum PrivateDisplayTransportAPI {
+    static func inspect(
+        displayID: CGDirectDisplayID,
+        targetWidth: Int?,
+        targetHeight: Int?
+    ) -> [DisplayTransportOption]? {
+        guard let display = cadDisplay(displayID: displayID) else { return nil }
+        guard let currentMode = display.value(forKey: "currentMode") as? NSObject else { return nil }
+
+        let resolvedWidth = targetWidth ?? intValue(currentMode.value(forKey: "width"))
+        let resolvedHeight = targetHeight ?? intValue(currentMode.value(forKey: "height"))
+        guard let resolvedWidth, let resolvedHeight else { return nil }
+
+        let currentDescriptor = String(describing: currentMode)
+        let modes = (display.value(forKey: "availableModes") as? [NSObject] ?? [])
+            .filter { mode in
+                intValue(mode.value(forKey: "width")) == resolvedWidth
+                    && intValue(mode.value(forKey: "height")) == resolvedHeight
+            }
+
+        guard !modes.isEmpty else { return nil }
+
+        var bestByTitle: [String: PrivateTransportCandidate] = [:]
+
+        for mode in modes {
+            let descriptor = String(describing: mode)
+            guard let parsed = parseModeDescriptor(descriptor) else { continue }
+
+            let isCurrent = descriptor == currentDescriptor
+            let candidate = PrivateTransportCandidate(
+                option: DisplayTransportOption(
+                    title: parsed.title,
+                    subtitle: descriptor,
+                    isCurrent: isCurrent,
+                    isUserSelectable: true,
+                    modeDescriptor: descriptor
+                ),
+                score: (isCurrent ? 10_000 : 0)
+                    + (parsed.isVirtual ? 0 : 1_000)
+                    + parsed.bitDepth
+                    + (parsed.transport == "RGB" ? 100 : 0)
+            )
+
+            if let existing = bestByTitle[parsed.title] {
+                if candidate.score > existing.score {
+                    bestByTitle[parsed.title] = candidate
+                }
+            } else {
+                bestByTitle[parsed.title] = candidate
+            }
+        }
+
+        return bestByTitle.values
+            .map(\.option)
+            .sorted { lhs, rhs in
+                if lhs.isCurrent != rhs.isCurrent { return lhs.isCurrent && !rhs.isCurrent }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    static func apply(displayID: CGDirectDisplayID, option: DisplayTransportOption) -> Bool {
+        guard let descriptor = option.modeDescriptor else { return false }
+        guard let display = cadDisplay(displayID: displayID) else { return false }
+        guard let modes = display.value(forKey: "availableModes") as? [NSObject] else { return false }
+        guard let targetMode = modes.first(where: { String(describing: $0) == descriptor }) else { return false }
+
+        _ = display.perform(NSSelectorFromString("setCurrentMode:"), with: targetMode)
+        _ = display.perform(NSSelectorFromString("update"))
+
+        guard let currentMode = display.value(forKey: "currentMode") as? NSObject else { return false }
+        return String(describing: currentMode) == descriptor
+    }
+
+    private static func cadDisplay(displayID: CGDirectDisplayID) -> NSObject? {
+        guard let cadDisplayClass = NSClassFromString("CADisplay") as? NSObject.Type else { return nil }
+        let displays = cadDisplayClass.perform(NSSelectorFromString("displays"))?.takeUnretainedValue() as? [NSObject] ?? []
+        return displays.first {
+            UInt32(intValue($0.value(forKey: "displayId")) ?? -1) == displayID
+        }
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        return value as? Int
+    }
+
+    private static func parseModeDescriptor(_ descriptor: String) -> ParsedPrivateTransportMode? {
+        guard let formatRange = descriptor.range(of: "fmt:") else { return nil }
+        guard let rangeRange = descriptor.range(of: " range:") else { return nil }
+
+        let formatToken = String(descriptor[formatRange.upperBound..<rangeRange.lowerBound])
+        let rangeToken = String(descriptor[rangeRange.upperBound...])
+            .trimmingCharacters(in: CharacterSet(charactersIn: ">"))
+
+        let isVirtual = descriptor.contains("virtual")
+        guard let transport = transportDetails(for: formatToken) else { return nil }
+
+        let dynamicRange = formatToken.contains("_PQ_") ? "HDR10" : "SDR"
+        let rangeLabel: String
+        switch rangeToken {
+        case "full":
+            rangeLabel = "Full Range"
+        case "limited":
+            rangeLabel = "Limited Range"
+        default:
+            rangeLabel = "\(rangeToken.capitalized) Range"
+        }
+
+        var parts = ["\(transport.bitDepth)-bit", dynamicRange, transport.transport]
+        if let chroma = transport.chroma {
+            parts.append(chroma)
+        }
+        parts.append(rangeLabel)
+
+        return ParsedPrivateTransportMode(
+            title: parts.joined(separator: " - "),
+            transport: transport.transport,
+            bitDepth: transport.bitDepth,
+            isVirtual: isVirtual
+        )
+    }
+
+    private static func transportDetails(for formatToken: String) -> (transport: String, chroma: String?, bitDepth: Int)? {
+        let bitDepth: Int
+        switch true {
+        case formatToken.contains("16bit"):
+            bitDepth = 16
+        case formatToken.contains("12bit"):
+            bitDepth = 12
+        case formatToken.contains("10bit"):
+            bitDepth = 10
+        case formatToken.contains("8bit"):
+            bitDepth = 8
+        default:
+            bitDepth = 8
+        }
+
+        if formatToken.hasPrefix("RGB") {
+            return ("RGB", nil, bitDepth)
+        }
+        if formatToken.hasPrefix("YCbCr444") {
+            return ("YCbCr", "4:4:4", bitDepth)
+        }
+        if formatToken.hasPrefix("YCbCr422") {
+            return ("YCbCr", "4:2:2", bitDepth)
+        }
+        if formatToken.hasPrefix("YCbCr420") {
+            return ("YCbCr", "4:2:0", bitDepth)
+        }
+
+        return nil
+    }
+}
+
+private struct PrivateTransportCandidate {
+    let option: DisplayTransportOption
+    let score: Int
+}
+
+private struct ParsedPrivateTransportMode {
+    let title: String
+    let transport: String
+    let bitDepth: Int
+    let isVirtual: Bool
+}
+
 private extension String {
     func containsInsensitive(_ needle: String) -> Bool {
         range(of: needle, options: .caseInsensitive) != nil
@@ -554,6 +926,8 @@ enum DisplayServiceError: LocalizedError {
     case modeNotFound
     case unableToCreateConfiguration
     case unableToApplyMode(Int32)
+    case transportOptionNotFound
+    case transportOptionNotSettable
 
     var errorDescription: String? {
         switch self {
@@ -565,6 +939,10 @@ enum DisplayServiceError: LocalizedError {
             return "Unable to create display configuration."
         case .unableToApplyMode(let code):
             return "Unable to apply display mode. CoreGraphics error: \(code)."
+        case .transportOptionNotFound:
+            return "Selected color transport option is no longer available."
+        case .transportOptionNotSettable:
+            return "Selected color transport option cannot be changed from MacRes."
         }
     }
 }

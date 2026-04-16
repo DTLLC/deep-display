@@ -26,9 +26,10 @@ struct DisplayTransportOption: Identifiable, Codable, Equatable {
     let subtitle: String?
     let isCurrent: Bool
     let isUserSelectable: Bool
+    let modeDescriptor: String?
 
     var id: String {
-        "\(title)|\(subtitle ?? "")|\(isCurrent)|\(isUserSelectable)"
+        "\(title)|\(subtitle ?? "")|\(isCurrent)|\(isUserSelectable)|\(modeDescriptor ?? "")"
     }
 }
 
