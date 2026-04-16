@@ -28,7 +28,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.onOpenSettings = onOpenSettings
         super.init()
 
-        statusItem.button?.title = "MacRes"
+        statusItem.button?.title = "Deep Display"
         statusItem.menu = menu
         menu.delegate = self
 
@@ -137,7 +137,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        let quitItem = NSMenuItem(title: "Quit MacRes", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Deep Display", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
     }

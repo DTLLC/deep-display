@@ -13,7 +13,7 @@ final class SettingsWindowController: NSWindowController {
             settingsStore: settingsStore
         )
         let window = NSWindow(contentViewController: viewController)
-        window.title = "MacRes Settings"
+        window.title = "Deep Display Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 760, height: 520))
         super.init(window: window)
@@ -55,7 +55,7 @@ final class SettingsViewController: NSViewController {
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let titleLabel = NSTextField(labelWithString: "MacRes")
+        let titleLabel = NSTextField(labelWithString: "Deep Display")
         titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
 
         let subtitleLabel = NSTextField(labelWithString: "Live display inventory, main-list mode switching, persisted presets, and override-backed HiDPI installation.")

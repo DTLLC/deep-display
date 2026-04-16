@@ -220,7 +220,7 @@ final class ModeChangeCoordinator {
         The override file is at:
         \(result.installedURL.path)
 
-        Unplug and reconnect the display, or log out / restart, so WindowServer reloads the override. Then reopen MacRes and select the real HiDPI mode from the main Resolution list.
+        Unplug and reconnect the display, or log out / restart, so WindowServer reloads the override. Then reopen Deep Display and select the real HiDPI mode from the main Resolution list.
         """
         alert.addButton(withTitle: "OK")
         alert.runModal()

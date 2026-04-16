@@ -942,7 +942,7 @@ enum DisplayServiceError: LocalizedError {
         case .transportOptionNotFound:
             return "Selected color transport option is no longer available."
         case .transportOptionNotSettable:
-            return "Selected color transport option cannot be changed from MacRes."
+            return "Selected color transport option cannot be changed from Deep Display."
         }
     }
 }

@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacRes",
+    name: "DeepDisplay",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MacRes", targets: ["MacRes"])
+        .executable(name: "DeepDisplay", targets: ["DeepDisplay"])
     ],
     targets: [
         .executableTarget(
-            name: "MacRes",
+            name: "DeepDisplay",
             path: "Sources"
         )
     ]

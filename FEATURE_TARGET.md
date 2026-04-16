@@ -1,4 +1,4 @@
-# MacRes Feature Target
+# Deep Display Feature Target
 
 ## Goal
 

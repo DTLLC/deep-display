@@ -2,7 +2,7 @@ import Foundation
 
 private func appSupportFileURL(_ name: String) -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("MacRes", isDirectory: true)
+        .appendingPathComponent("DeepDisplay", isDirectory: true)
         .appendingPathComponent(name)
 }
 
