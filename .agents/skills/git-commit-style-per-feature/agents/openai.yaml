@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Commit Style Per Feature"
+  short_description: "Group Git commits by feature"
+  default_prompt: "Use $git-commit-style-per-feature to either propose feature-based commits for approval or, when asked to commit and push, execute the full feature-based commit-and-push flow."
