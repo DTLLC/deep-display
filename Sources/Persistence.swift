@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 private func appSupportFileURL(_ name: String) -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -31,6 +32,7 @@ private func saveJSON<Value: Codable>(_ value: Value, to fileURL: URL) {
     try? data.write(to: fileURL, options: .atomic)
 }
 
+@Observable
 @MainActor
 final class PresetStore {
     private(set) var presets: [Preset]
@@ -71,6 +73,7 @@ final class PresetStore {
     }
 }
 
+@Observable
 @MainActor
 final class SettingsStore {
     private(set) var settings: AppSettings

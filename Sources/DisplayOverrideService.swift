@@ -20,6 +20,10 @@ final class DisplayOverrideService {
             throw DisplayOverrideError.modeDoesNotNeedOverride
         }
 
+        return try installAllVirtualResolutions(for: display)
+    }
+
+    func installAllVirtualResolutions(for display: DisplaySnapshot) throws -> DisplayOverrideInstallResult {
         let descriptor = descriptor(for: display)
         let installableModes = display.availableModes
             .filter { $0.requiresOverrideInstall && $0.isHiDPI }
@@ -41,6 +45,62 @@ final class DisplayOverrideService {
             didInstall: installOutcome.didInstall,
             installedModeCount: installableModes.count
         )
+    }
+
+    func activationStatus(for display: DisplaySnapshot, requestedMode: DisplayModeSnapshot?) -> VirtualResolutionActivationStatus {
+        guard let requestedMode, requestedMode.requiresOverrideInstall, requestedMode.isHiDPI else {
+            return .notRequired
+        }
+
+        let descriptor = descriptor(for: display)
+        if let installedURL = installedOverrideURL(for: descriptor) {
+            return .installedNeedsDesktopReload(installedURL)
+        }
+
+        return .notInstalled
+    }
+
+    func resetVirtualResolutions(for display: DisplaySnapshot) throws -> URL? {
+        let descriptor = descriptor(for: display)
+        let installedURL = URL(fileURLWithPath: "/Library/Displays/Contents/Resources/Overrides", isDirectory: true)
+            .appendingPathComponent(descriptor.vendorDirectoryName, isDirectory: true)
+            .appendingPathComponent(descriptor.productFileName, isDirectory: false)
+
+        guard fileManager.fileExists(atPath: installedURL.path) else {
+            return nil
+        }
+
+        let installDirectory = installedURL.deletingLastPathComponent().path
+        let shellCommand = """
+        set -e
+        rm -f \(shellQuoted(installedURL.path))
+        rmdir \(shellQuoted(installDirectory)) 2>/dev/null || true
+        """
+
+        try runPrivilegedShell(shellCommand)
+        return installedURL
+    }
+
+    func reloadDesktopSession() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+            "-e",
+            #"tell application "System Events" to log out"#
+        ]
+
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        process.standardOutput = Pipe()
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw DisplayOverrideError.desktopReloadFailed(message?.isEmpty == false ? message! : "macOS refused to log out the desktop session.")
+        }
     }
 
     private func descriptor(for display: DisplaySnapshot) -> DisplayOverrideDescriptor {
@@ -248,6 +308,12 @@ struct DisplayOverrideInstallResult {
     let installedModeCount: Int
 }
 
+enum VirtualResolutionActivationStatus: Equatable {
+    case notRequired
+    case notInstalled
+    case installedNeedsDesktopReload(URL)
+}
+
 private struct DisplayOverrideDescriptor {
     let displayID: CGDirectDisplayID
     let vendorID: Int
@@ -270,6 +336,7 @@ enum DisplayOverrideError: LocalizedError {
     case modeDoesNotNeedOverride
     case noInstallableHiDPIModes
     case installFailed(String)
+    case desktopReloadFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -278,6 +345,8 @@ enum DisplayOverrideError: LocalizedError {
         case .noInstallableHiDPIModes:
             return "No installable HiDPI override modes were generated for this display."
         case .installFailed(let message):
+            return message
+        case .desktopReloadFailed(let message):
             return message
         }
     }

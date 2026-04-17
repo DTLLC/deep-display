@@ -1,5 +1,7 @@
-import AppKit
+import Foundation
+import Observation
 
+@Observable
 @MainActor
 final class AppController {
     let displayService: DisplayService
@@ -7,9 +9,9 @@ final class AppController {
     let settingsStore: SettingsStore
     let displayOverrideService: DisplayOverrideService
     let modeChangeCoordinator: ModeChangeCoordinator
+    var selectedDisplayID: UInt32?
 
-    private let menuBarController: MenuBarController
-    private let settingsWindowController: SettingsWindowController
+    private var displayObserverID: UUID?
 
     init(
         displayService: DisplayService? = nil,
@@ -27,27 +29,43 @@ final class AppController {
             settingsStore: settingsStore,
             displayOverrideService: displayOverrideService
         )
+
         self.displayService = displayService
         self.presetStore = presetStore
         self.settingsStore = settingsStore
         self.displayOverrideService = displayOverrideService
-        self.displayService.synthesizeHiDPIForEligibleModes = settingsStore.settings.synthesizeHiDPIForEligibleModes
         self.modeChangeCoordinator = modeChangeCoordinator
-        self.settingsWindowController = SettingsWindowController(
-            displayService: displayService,
-            presetStore: presetStore,
-            settingsStore: settingsStore
-        )
-        self.menuBarController = MenuBarController(
-            displayService: displayService,
-            presetStore: presetStore,
-            settingsStore: settingsStore,
-            modeChangeCoordinator: modeChangeCoordinator,
-            onOpenSettings: { [weak settingsWindowController] in
-                settingsWindowController?.showWindow(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        )
-        displayService.start()
+
+        self.displayService.synthesizeHiDPIForEligibleModes = settingsStore.settings.synthesizeHiDPIForEligibleModes
+        self.displayService.start()
+        self.displayObserverID = self.displayService.addObserver { [weak self] _ in
+            self?.synchronizeSelectionIfNeeded()
+        }
+        synchronizeSelectionIfNeeded()
+    }
+
+    func refreshDisplays() {
+        displayService.synthesizeHiDPIForEligibleModes = settingsStore.settings.synthesizeHiDPIForEligibleModes
+        displayService.refreshDisplays()
+        synchronizeSelectionIfNeeded()
+    }
+
+    var selectedDisplay: DisplaySnapshot? {
+        guard let selectedDisplayID else { return displayService.displays.first }
+        return displayService.displays.first(where: { $0.id == selectedDisplayID }) ?? displayService.displays.first
+    }
+
+    private func synchronizeSelectionIfNeeded() {
+        let displayIDs = displayService.displays.map(\.id)
+        guard !displayIDs.isEmpty else {
+            selectedDisplayID = nil
+            return
+        }
+
+        if let selectedDisplayID, displayIDs.contains(selectedDisplayID) {
+            return
+        }
+
+        selectedDisplayID = displayIDs.first
     }
 }

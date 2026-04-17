@@ -19,6 +19,15 @@ struct DisplaySnapshot: Identifiable, Codable, Equatable {
     var cgDirectDisplayID: CGDirectDisplayID {
         id
     }
+
+    var selectionSyncToken: String {
+        [
+            String(id),
+            currentMode?.id ?? "no-mode",
+            availableModes.map(\.id).joined(separator: ","),
+            transportOptions.map { "\($0.id):\($0.isCurrent)" }.joined(separator: ",")
+        ].joined(separator: "|")
+    }
 }
 
 struct DisplayTransportOption: Identifiable, Codable, Equatable {
@@ -29,7 +38,7 @@ struct DisplayTransportOption: Identifiable, Codable, Equatable {
     let modeDescriptor: String?
 
     var id: String {
-        "\(title)|\(subtitle ?? "")|\(isCurrent)|\(isUserSelectable)|\(modeDescriptor ?? "")"
+        modeDescriptor ?? "\(title)|\(subtitle ?? "")|\(isUserSelectable)"
     }
 }
 
@@ -117,8 +126,8 @@ struct DisplayModeSnapshot: Identifiable, Codable, Equatable, Hashable {
 
     var resolutionVariantLabel: String {
         var parts = [resolutionLabel]
-        if isHiDPI {
-            parts.append("HiDPI")
+        if let hidpiLabel {
+            parts.append(hidpiLabel)
         }
         if isLowResolution {
             parts.append("Low Res")
@@ -145,8 +154,8 @@ struct DisplayModeSnapshot: Identifiable, Codable, Equatable, Hashable {
 
     var summaryLabel: String {
         var parts = [resolutionLabel, refreshLabel]
-        if isHiDPI {
-            parts.append("HiDPI")
+        if let hidpiLabel {
+            parts.append(hidpiLabel)
         }
         if isLowResolution {
             parts.append("Low Res")
@@ -164,6 +173,15 @@ struct DisplayModeSnapshot: Identifiable, Codable, Equatable, Hashable {
             parts.append("Stretched")
         }
         return parts.joined(separator: " • ")
+    }
+
+    var hidpiLabel: String? {
+        guard isHiDPI else { return nil }
+        return isVirtualHiDPI ? "vHiDPI" : "HiDPI"
+    }
+
+    var isVirtualHiDPI: Bool {
+        requiresOverrideInstall || source == .syntheticOverride
     }
 
     private func gcd(_ a: Int, _ b: Int) -> Int {

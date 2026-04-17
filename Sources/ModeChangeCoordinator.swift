@@ -1,7 +1,9 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import Observation
 
+@Observable
 @MainActor
 final class ModeChangeCoordinator {
     private let displayService: DisplayService
@@ -9,9 +11,11 @@ final class ModeChangeCoordinator {
     private let settingsStore: SettingsStore
     private let displayOverrideService: DisplayOverrideService
 
-    private var confirmationController: ModeConfirmationWindowController?
+    var pendingChange: PendingChangeState?
+    var lastErrorMessage: String?
+    var lastOverrideInstallMessage: String?
+
     private var countdownTimer: Timer?
-    private var pendingChange: PendingChange?
 
     init(
         displayService: DisplayService,
@@ -31,9 +35,9 @@ final class ModeChangeCoordinator {
         if mode.requiresOverrideInstall {
             do {
                 let result = try displayOverrideService.installHiDPIOverride(for: display, requestedMode: mode)
-                presentOverrideInstalled(for: display, result: result, mode: mode)
+                lastOverrideInstallMessage = overrideInstallMessage(for: display, result: result, mode: mode)
             } catch {
-                presentError(title: "Unable to install HiDPI override", error: error)
+                lastErrorMessage = "Unable to install HiDPI override: \(error.localizedDescription)"
             }
             return
         }
@@ -50,7 +54,7 @@ final class ModeChangeCoordinator {
                 fallbacks: [fallback]
             )
         } catch {
-            presentError(title: "Unable to switch display mode", error: error)
+            lastErrorMessage = "Unable to switch display mode: \(error.localizedDescription)"
         }
     }
 
@@ -72,8 +76,80 @@ final class ModeChangeCoordinator {
                 fallbacks: fallbacks
             )
         } catch {
-            presentError(title: "Unable to apply preset", error: error)
+            lastErrorMessage = "Unable to apply preset: \(error.localizedDescription)"
         }
+    }
+
+    func installVirtualResolutions(displayID: CGDirectDisplayID) {
+        guard let display = displayService.snapshot(for: displayID) else { return }
+
+        do {
+            let result = try displayOverrideService.installAllVirtualResolutions(for: display)
+            lastOverrideInstallMessage = """
+            \(result.didInstall ? "Installed" : "Already installed") virtual resolutions for \(display.name).
+
+            Added \(result.installedModeCount) vHiDPI entries.
+            Override file: \(result.installedURL.path)
+
+            No full machine reboot needed. Unplug and reconnect display, or log out to reload desktop session.
+            """
+        } catch {
+            lastErrorMessage = "Unable to install virtual resolutions: \(error.localizedDescription)"
+        }
+    }
+
+    func resetVirtualResolutions(displayID: CGDirectDisplayID) {
+        guard let display = displayService.snapshot(for: displayID) else { return }
+
+        do {
+            let removedURL = try displayOverrideService.resetVirtualResolutions(for: display)
+            lastOverrideInstallMessage = removedURL.map {
+                """
+                Reset virtual resolutions for \(display.name).
+
+                Removed override: \($0.path)
+
+                Log out or reconnect display to make WindowServer reload display modes.
+                """
+            } ?? """
+            No installed virtual-resolution override found for \(display.name).
+            """
+        } catch {
+            lastErrorMessage = "Unable to reset virtual resolutions: \(error.localizedDescription)"
+        }
+    }
+
+    func reloadDesktopSession() {
+        do {
+            try displayOverrideService.reloadDesktopSession()
+        } catch {
+            lastErrorMessage = "Unable to reload desktop session: \(error.localizedDescription)"
+        }
+    }
+
+    func confirmPendingChange() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        pendingChange = nil
+    }
+
+    func revertPendingChange() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+
+        if let pendingChange {
+            try? revert(configurations: pendingChange.fallbacks)
+        }
+
+        self.pendingChange = nil
+    }
+
+    func dismissError() {
+        lastErrorMessage = nil
+    }
+
+    func dismissOverrideInstallMessage() {
+        lastOverrideInstallMessage = nil
     }
 
     private func performChange(
@@ -123,26 +199,11 @@ final class ModeChangeCoordinator {
         guard !fallbacks.isEmpty else { return }
 
         let timeout = max(5, Int(settingsStore.settings.autoRevertTimeout.rounded()))
-        let confirmationController = ModeConfirmationWindowController(
+        pendingChange = PendingChangeState(
             summary: summary,
-            secondsRemaining: timeout
-        )
-
-        confirmationController.onKeepChanges = { [weak self] in
-            self?.confirmPendingChange()
-        }
-        confirmationController.onRevertChanges = { [weak self] in
-            self?.revertPendingChange()
-        }
-
-        self.confirmationController = confirmationController
-        self.pendingChange = PendingChange(
             fallbacks: fallbacks,
             secondsRemaining: timeout
         )
-
-        confirmationController.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
 
         countdownTimer?.invalidate()
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -161,32 +222,10 @@ final class ModeChangeCoordinator {
 
         pendingChange.secondsRemaining -= 1
         self.pendingChange = pendingChange
-        confirmationController?.update(secondsRemaining: pendingChange.secondsRemaining)
 
         if pendingChange.secondsRemaining <= 0 {
             revertPendingChange()
         }
-    }
-
-    private func confirmPendingChange() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-        pendingChange = nil
-        confirmationController?.close()
-        confirmationController = nil
-    }
-
-    private func revertPendingChange() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-
-        if let pendingChange {
-            try? revert(configurations: pendingChange.fallbacks)
-        }
-
-        pendingChange = nil
-        confirmationController?.close()
-        confirmationController = nil
     }
 
     private func revert(configurations: some Sequence<DisplayConfiguration>) throws {
@@ -196,117 +235,29 @@ final class ModeChangeCoordinator {
         }
     }
 
-    private func presentError(title: String, error: Error) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = error.localizedDescription
-        alert.runModal()
-    }
-
-    private func presentOverrideInstalled(
+    private func overrideInstallMessage(
         for display: DisplaySnapshot,
         result: DisplayOverrideInstallResult,
         mode: DisplayModeSnapshot
-    ) {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = result.didInstall
-            ? "Installed HiDPI override for \(display.name)"
-            : "HiDPI override already installed for \(display.name)"
-        alert.informativeText = """
-        Logical mode: \(mode.resolutionLabel) HiDPI
+    ) -> String {
+        let status = result.didInstall
+            ? "Installed HiDPI override for \(display.name)."
+            : "HiDPI override was already installed for \(display.name)."
+
+        return """
+        \(status)
+
+        Logical mode: \(mode.resolutionLabel) \(mode.hidpiLabel ?? "")
         Virtual backing: \(mode.backingResolutionLabel)
+        Override file: \(result.installedURL.path)
 
-        The override file is at:
-        \(result.installedURL.path)
-
-        Unplug and reconnect the display, or log out / restart, so WindowServer reloads the override. Then reopen Deep Display and select the real HiDPI mode from the main Resolution list.
+        The virtual profile is installed, but macOS will not use it until WindowServer reloads display overrides. Reconnect the display or log out and back in, then reopen Deep Display and pick the real vHiDPI mode.
         """
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 }
 
-private struct PendingChange {
+struct PendingChangeState {
+    let summary: String
     let fallbacks: [DisplayConfiguration]
     var secondsRemaining: Int
-}
-
-@MainActor
-final class ModeConfirmationWindowController: NSWindowController {
-    var onKeepChanges: (() -> Void)?
-    var onRevertChanges: (() -> Void)?
-
-    private let summary: String
-    private let titleLabel = NSTextField(labelWithString: "Keep these display changes?")
-    private let summaryLabel = NSTextField(labelWithString: "")
-    private let countdownLabel = NSTextField(labelWithString: "")
-
-    init(summary: String, secondsRemaining: Int) {
-        self.summary = summary
-
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 180))
-        let window = NSWindow(
-            contentRect: root.frame,
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Confirm Display Change"
-        window.isReleasedWhenClosed = false
-        super.init(window: window)
-
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
-        summaryLabel.stringValue = summary
-        summaryLabel.maximumNumberOfLines = 0
-        summaryLabel.lineBreakMode = .byWordWrapping
-        summaryLabel.textColor = .secondaryLabelColor
-
-        let keepButton = NSButton(title: "Keep Changes", target: self, action: #selector(keepChanges))
-        keepButton.bezelStyle = .rounded
-
-        let revertButton = NSButton(title: "Revert Now", target: self, action: #selector(revertChanges))
-        revertButton.bezelStyle = .rounded
-
-        let buttonRow = NSStackView(views: [keepButton, revertButton])
-        buttonRow.orientation = .horizontal
-        buttonRow.spacing = 12
-
-        let stack = NSStackView(views: [titleLabel, summaryLabel, countdownLabel, buttonRow])
-        stack.orientation = .vertical
-        stack.spacing = 12
-        stack.alignment = .leading
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -20)
-        ])
-
-        window.contentView = root
-        update(secondsRemaining: secondsRemaining)
-        window.center()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func update(secondsRemaining: Int) {
-        countdownLabel.stringValue = "Auto-revert in \(max(0, secondsRemaining)) seconds."
-    }
-
-    @objc
-    private func keepChanges() {
-        onKeepChanges?()
-    }
-
-    @objc
-    private func revertChanges() {
-        onRevertChanges?()
-    }
 }

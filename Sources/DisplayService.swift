@@ -3,6 +3,7 @@ import CoreGraphics
 import Darwin
 import Foundation
 import IOKit
+import Observation
 import QuartzCore
 
 private func makeDisplayModeQueryOptions() -> CFDictionary {
@@ -11,6 +12,7 @@ private func makeDisplayModeQueryOptions() -> CFDictionary {
     ] as CFDictionary
 }
 
+@Observable
 @MainActor
 final class DisplayService: NSObject {
     var synthesizeHiDPIForEligibleModes = true
@@ -36,6 +38,18 @@ final class DisplayService: NSObject {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
     }
 
     deinit {
@@ -44,6 +58,16 @@ final class DisplayService: NSObject {
 
     @objc
     private func workspaceDidWake() {
+        scheduleRefresh()
+    }
+
+    @objc
+    private func applicationDidBecomeActive() {
+        scheduleRefresh()
+    }
+
+    @objc
+    private func screenParametersDidChange() {
         scheduleRefresh()
     }
 
@@ -793,12 +817,27 @@ private enum PrivateDisplayTransportAPI {
             }
         }
 
-        return bestByTitle.values
+        var options = bestByTitle.values
             .map(\.option)
             .sorted { lhs, rhs in
                 if lhs.isCurrent != rhs.isCurrent { return lhs.isCurrent && !rhs.isCurrent }
                 return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
             }
+
+        if !options.contains(where: \.isCurrent),
+           let currentParsed = parseModeDescriptor(currentDescriptor),
+           let currentIndex = options.firstIndex(where: { $0.title == currentParsed.title }) {
+            let matched = options[currentIndex]
+            options[currentIndex] = DisplayTransportOption(
+                title: matched.title,
+                subtitle: matched.subtitle,
+                isCurrent: true,
+                isUserSelectable: matched.isUserSelectable,
+                modeDescriptor: matched.modeDescriptor
+            )
+        }
+
+        return options
     }
 
     static func apply(displayID: CGDirectDisplayID, option: DisplayTransportOption) -> Bool {
