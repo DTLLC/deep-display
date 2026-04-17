@@ -447,7 +447,7 @@ private struct DisplayControlCard: View {
                     HStack(spacing: 16) {
                         Picker("Resolution", selection: resolutionSelection) {
                             ForEach(resolutionOptions) { option in
-                                Text(menuLabel(option.title, isCurrent: option.contains(display.currentMode)))
+                                Text(option.title)
                                     .tag(Optional(option.id))
                             }
                         }
@@ -472,7 +472,7 @@ private struct DisplayControlCard: View {
                 ControlRow("Refresh Rate", highlighted: hasRefreshChange) {
                     Picker("Refresh Rate", selection: refreshSelection) {
                         ForEach(refreshOptions) { mode in
-                            Text(menuLabel(refreshMenuLabel(for: mode), isCurrent: refreshMatchesCurrent(mode)))
+                            Text(refreshMenuLabel(for: mode))
                                 .tag(mode.id)
                         }
                     }
@@ -483,7 +483,7 @@ private struct DisplayControlCard: View {
                 ControlRow("Range", highlighted: hasRangeChange) {
                     Picker("Range", selection: transportSelection) {
                         ForEach(display.transportOptions) { option in
-                            Text(menuLabel(transportMenuLabel(for: option), isCurrent: option.isCurrent))
+                            Text(transportMenuLabel(for: option))
                                 .tag(option.id)
                         }
                     }
@@ -547,10 +547,6 @@ private struct DisplayControlCard: View {
             .filter { !$0.contains("CADisplayMode") && !$0.contains("fmt:") && !$0.contains("range:") }
             .joined(separator: " • ")
         return filtered.isEmpty ? "Current transport profile" : filtered
-    }
-
-    private func menuLabel(_ title: String, isCurrent: Bool) -> String {
-        title
     }
 
     private func refreshMatchesCurrent(_ mode: DisplayModeSnapshot) -> Bool {
