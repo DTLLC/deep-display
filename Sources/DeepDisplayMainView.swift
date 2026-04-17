@@ -5,6 +5,7 @@ struct DeepDisplayMainView: View {
 
     @Environment(\.openWindow) private var openWindow
     @State private var pendingSelection: PendingDisplaySelection?
+    @State private var draftResetToken = 0
 
     var body: some View {
         @Bindable var modeChangeCoordinator = appController.modeChangeCoordinator
@@ -42,7 +43,7 @@ struct DeepDisplayMainView: View {
                     pendingSelection: pendingSelection,
                     apply: { applyPendingSelection(pendingSelection) },
                     reloadDesktopSession: appController.modeChangeCoordinator.reloadDesktopSession,
-                    dismiss: { self.pendingSelection = nil }
+                    dismiss: dismissPendingSelection
                 )
             }
 
@@ -55,6 +56,7 @@ struct DeepDisplayMainView: View {
                         settingsStore: appController.settingsStore,
                         modeChangeCoordinator: appController.modeChangeCoordinator,
                         displayOverrideService: appController.displayOverrideService,
+                        resetToken: draftResetToken,
                         onDraftChange: { draft in
                             self.pendingSelection = draft
                         }
@@ -126,6 +128,11 @@ struct DeepDisplayMainView: View {
         case .installedNeedsDesktopReload:
             appController.modeChangeCoordinator.lastOverrideInstallMessage = pendingSelection.bannerMessage
         }
+    }
+
+    private func dismissPendingSelection() {
+        pendingSelection = nil
+        draftResetToken += 1
     }
 }
 
@@ -291,6 +298,7 @@ private struct DisplayDetailView: View {
     let settingsStore: SettingsStore
     let modeChangeCoordinator: ModeChangeCoordinator
     let displayOverrideService: DisplayOverrideService
+    let resetToken: Int
     let onDraftChange: (PendingDisplaySelection?) -> Void
 
     var body: some View {
@@ -304,7 +312,7 @@ private struct DisplayDetailView: View {
                     displayOverrideService: displayOverrideService,
                     onDraftChange: onDraftChange
                 )
-                .id(display.selectionSyncToken)
+                .id("\(display.selectionSyncToken)|reset:\(resetToken)")
             }
             .frame(maxWidth: 620, alignment: .leading)
             .padding(24)
@@ -399,11 +407,23 @@ private struct DisplayControlCard: View {
     }
 
     private var isRefreshCurrent: Bool {
-        selectedMode == display.currentMode
+        selectedMode.map(refreshMatchesCurrent(_:)) ?? false
     }
 
     private var isTransportCurrent: Bool {
         selectedTransportOption?.id == currentTransportOption?.id
+    }
+
+    private var hasResolutionChange: Bool {
+        !isResolutionCurrent || !isHiDPICurrent
+    }
+
+    private var hasRefreshChange: Bool {
+        !isRefreshCurrent
+    }
+
+    private var hasRangeChange: Bool {
+        !isTransportCurrent
     }
 
     private var pendingSelection: PendingDisplaySelection? {
@@ -423,20 +443,24 @@ private struct DisplayControlCard: View {
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 18) {
-                ControlRow("Resolution") {
+                ControlRow("Resolution", highlighted: hasResolutionChange) {
                     HStack(spacing: 16) {
                         Picker("Resolution", selection: resolutionSelection) {
                             ForEach(resolutionOptions) { option in
-                                Text(option.title).tag(Optional(option.id))
+                                Text(menuLabel(option.title, isCurrent: option.contains(display.currentMode)))
+                                    .tag(Optional(option.id))
                             }
                         }
                         .labelsHidden()
                         .frame(width: 280, alignment: .leading)
-                        .fontWeight(isResolutionCurrent ? .semibold : .regular)
 
                         Text(hiDPIToggleLabel)
-                            .fontWeight(isHiDPICurrent ? .semibold : .regular)
-                            .foregroundStyle(selectedResolutionSupportsHiDPI ? .primary : .secondary)
+                            .fontWeight(isHiDPICurrent ? .regular : .bold)
+                            .foregroundStyle(
+                                selectedResolutionSupportsHiDPI
+                                ? (isHiDPICurrent ? Color.primary : Color.accentColor)
+                                : Color.secondary
+                            )
 
                         Toggle(hiDPIToggleLabel, isOn: hiDPISelection)
                             .labelsHidden()
@@ -445,26 +469,26 @@ private struct DisplayControlCard: View {
                     }
                 }
 
-                ControlRow("Refresh Rate") {
+                ControlRow("Refresh Rate", highlighted: hasRefreshChange) {
                     Picker("Refresh Rate", selection: refreshSelection) {
                         ForEach(refreshOptions) { mode in
-                            Text(refreshMenuLabel(for: mode)).tag(mode.id)
+                            Text(menuLabel(refreshMenuLabel(for: mode), isCurrent: refreshMatchesCurrent(mode)))
+                                .tag(mode.id)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 220, alignment: .leading)
-                    .fontWeight(isRefreshCurrent ? .semibold : .regular)
                 }
 
-                ControlRow("Range") {
+                ControlRow("Range", highlighted: hasRangeChange) {
                     Picker("Range", selection: transportSelection) {
                         ForEach(display.transportOptions) { option in
-                            Text(transportMenuLabel(for: option)).tag(option.id)
+                            Text(menuLabel(transportMenuLabel(for: option), isCurrent: option.isCurrent))
+                                .tag(option.id)
                         }
                     }
                     .labelsHidden()
                     .frame(width: 330, alignment: .leading)
-                    .fontWeight(isTransportCurrent ? .semibold : .regular)
                     .disabled(display.transportOptions.isEmpty || hasModeChange)
                 }
 
@@ -525,15 +549,38 @@ private struct DisplayControlCard: View {
         return filtered.isEmpty ? "Current transport profile" : filtered
     }
 
+    private func menuLabel(_ title: String, isCurrent: Bool) -> String {
+        title
+    }
+
+    private func refreshMatchesCurrent(_ mode: DisplayModeSnapshot) -> Bool {
+        guard let currentMode = display.currentMode else { return false }
+        return abs(mode.refreshRate - currentMode.refreshRate) < 0.01
+    }
+
+    private func preferredRefreshModeID(preferredRate: Double?) -> String {
+        if let preferredRate,
+           let matchingMode = refreshOptions.first(where: { abs($0.refreshRate - preferredRate) < 0.01 }) {
+            return matchingMode.id
+        }
+
+        if let selectedRefresh = refreshOptions.first(where: { $0.id == selectedRefreshModeID }) {
+            return selectedRefresh.id
+        }
+
+        return refreshOptions.first?.id ?? ""
+    }
+
     private var resolutionSelection: Binding<ResolutionOptionKey?> {
         Binding(
             get: { selectedResolutionID },
             set: { newValue in
+                let preferredRefreshRate = selectedMode?.refreshRate ?? display.currentMode?.refreshRate
                 selectedResolutionID = newValue
                 if selectedResolutionSupportsHiDPI {
                     hiDPIEnabled = true
                 }
-                selectedRefreshModeID = refreshOptions.first?.id ?? ""
+                selectedRefreshModeID = preferredRefreshModeID(preferredRate: preferredRefreshRate)
                 publishDraftState()
             }
         )
@@ -543,8 +590,9 @@ private struct DisplayControlCard: View {
         Binding(
             get: { hiDPIEnabled },
             set: { newValue in
+                let preferredRefreshRate = selectedMode?.refreshRate ?? display.currentMode?.refreshRate
                 hiDPIEnabled = newValue
-                selectedRefreshModeID = refreshOptions.first?.id ?? ""
+                selectedRefreshModeID = preferredRefreshModeID(preferredRate: preferredRefreshRate)
                 publishDraftState()
             }
         )
@@ -737,16 +785,20 @@ private struct SummaryChip: View {
 
 private struct ControlRow<Content: View>: View {
     let title: String
+    let highlighted: Bool
     @ViewBuilder let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String, highlighted: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.highlighted = highlighted
         self.content = content()
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
+                .fontWeight(highlighted ? .bold : .regular)
+                .foregroundStyle(highlighted ? Color.accentColor : Color.primary)
                 .frame(width: 120, alignment: .leading)
             content
             Spacer(minLength: 0)
