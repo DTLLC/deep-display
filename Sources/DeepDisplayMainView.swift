@@ -533,20 +533,15 @@ private struct DisplayControlCard: View {
     }
 
     private func transportMenuLabel(for option: DisplayTransportOption) -> String {
-        cleanedTransportText(option.subtitle.map { "\(option.title) • \($0)" } ?? option.title)
+        option.title
     }
 
     private func transportDetailText(for option: DisplayTransportOption?) -> String {
-        guard let option else { return "Current transport profile" }
-        return cleanedTransportText(option.subtitle ?? option.modeDescriptor ?? "Current transport profile")
-    }
-
-    private func cleanedTransportText(_ text: String) -> String {
-        let filtered = text
-            .components(separatedBy: " • ")
-            .filter { !$0.contains("CADisplayMode") && !$0.contains("fmt:") && !$0.contains("range:") }
-            .joined(separator: " • ")
-        return filtered.isEmpty ? "Current transport profile" : filtered
+        guard let option else { return "Current transport profile for this resolution." }
+        if option.isCurrent {
+            return "Current transport profile for this resolution."
+        }
+        return "Applies this exact transport profile variant at the current resolution."
     }
 
     private func refreshMatchesCurrent(_ mode: DisplayModeSnapshot) -> Bool {

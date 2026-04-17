@@ -179,7 +179,7 @@ final class DisplayService: NSObject {
             frame: DisplayFrame(rect: CGDisplayBounds(displayID)),
             currentMode: currentSnapshot,
             availableModes: availableModes,
-            transportOptions: transportOptions(for: displayID, currentMode: currentSnapshot)
+            transportOptions: transportOptions(for: displayID)
         )
     }
 
@@ -405,15 +405,8 @@ final class DisplayService: NSObject {
         refreshDisplays()
     }
 
-    private func transportOptions(
-        for displayID: CGDirectDisplayID,
-        currentMode: DisplayModeSnapshot?
-    ) -> [DisplayTransportOption] {
-        if let privateOptions = PrivateDisplayTransportAPI.inspect(
-            displayID: displayID,
-            targetWidth: currentMode?.width,
-            targetHeight: currentMode?.height
-        ), !privateOptions.isEmpty {
+    private func transportOptions(for displayID: CGDirectDisplayID) -> [DisplayTransportOption] {
+        if let privateOptions = PrivateDisplayTransportAPI.inspect(displayID: displayID), !privateOptions.isEmpty {
             return privateOptions
         }
 
@@ -493,7 +486,8 @@ private enum DisplayTransportInspector {
                     subtitle: mode.detail,
                     isCurrent: currentIndex == index,
                     isUserSelectable: false,
-                    modeDescriptor: nil
+                    modeDescriptor: nil,
+                    modeMatchToken: nil
                 )
             }
         }
@@ -505,7 +499,8 @@ private enum DisplayTransportInspector {
                 subtitle: currentState.detail,
                 isCurrent: true,
                 isUserSelectable: false,
-                modeDescriptor: nil
+                modeDescriptor: nil,
+                modeMatchToken: nil
             )
         ]
     }
@@ -766,19 +761,16 @@ private struct RegistryTransportMode {
 }
 
 private enum PrivateDisplayTransportAPI {
-    static func inspect(
-        displayID: CGDirectDisplayID,
-        targetWidth: Int?,
-        targetHeight: Int?
-    ) -> [DisplayTransportOption]? {
+    static func inspect(displayID: CGDirectDisplayID) -> [DisplayTransportOption]? {
         guard let display = cadDisplay(displayID: displayID) else { return nil }
         guard let currentMode = display.value(forKey: "currentMode") as? NSObject else { return nil }
 
-        let resolvedWidth = targetWidth ?? intValue(currentMode.value(forKey: "width"))
-        let resolvedHeight = targetHeight ?? intValue(currentMode.value(forKey: "height"))
+        let resolvedWidth = intValue(currentMode.value(forKey: "width"))
+        let resolvedHeight = intValue(currentMode.value(forKey: "height"))
         guard let resolvedWidth, let resolvedHeight else { return nil }
 
         let currentDescriptor = String(describing: currentMode)
+        let currentModeToken = privateRepresentationHex(for: currentMode)
         let modes = (display.value(forKey: "availableModes") as? [NSObject] ?? [])
             .filter { mode in
                 intValue(mode.value(forKey: "width")) == resolvedWidth
@@ -793,14 +785,17 @@ private enum PrivateDisplayTransportAPI {
             let descriptor = String(describing: mode)
             guard let parsed = parseModeDescriptor(descriptor) else { continue }
 
-            let isCurrent = descriptor == currentDescriptor
+            let modeToken = privateRepresentationHex(for: mode)
+            let groupKey = parsed.title
+            let isCurrent = (modeToken != nil && modeToken == currentModeToken) || descriptor == currentDescriptor
             let candidate = PrivateTransportCandidate(
                 option: DisplayTransportOption(
                     title: parsed.title,
                     subtitle: descriptor,
                     isCurrent: isCurrent,
                     isUserSelectable: true,
-                    modeDescriptor: descriptor
+                    modeDescriptor: descriptor,
+                    modeMatchToken: modeToken
                 ),
                 score: (isCurrent ? 10_000 : 0)
                     + (parsed.isVirtual ? 0 : 1_000)
@@ -808,12 +803,12 @@ private enum PrivateDisplayTransportAPI {
                     + (parsed.transport == "RGB" ? 100 : 0)
             )
 
-            if let existing = bestByTitle[parsed.title] {
+            if let existing = bestByTitle[groupKey] {
                 if candidate.score > existing.score {
-                    bestByTitle[parsed.title] = candidate
+                    bestByTitle[groupKey] = candidate
                 }
             } else {
-                bestByTitle[parsed.title] = candidate
+                bestByTitle[groupKey] = candidate
             }
         }
 
@@ -825,15 +820,18 @@ private enum PrivateDisplayTransportAPI {
             }
 
         if !options.contains(where: \.isCurrent),
-           let currentParsed = parseModeDescriptor(currentDescriptor),
-           let currentIndex = options.firstIndex(where: { $0.title == currentParsed.title }) {
+           let currentGroupKey = parseModeDescriptor(currentDescriptor)?.title,
+           let currentIndex = bestByTitle[currentGroupKey].flatMap({ candidate in
+               options.firstIndex(where: { $0.id == candidate.option.id })
+           }) {
             let matched = options[currentIndex]
             options[currentIndex] = DisplayTransportOption(
                 title: matched.title,
                 subtitle: matched.subtitle,
                 isCurrent: true,
                 isUserSelectable: matched.isUserSelectable,
-                modeDescriptor: matched.modeDescriptor
+                modeDescriptor: matched.modeDescriptor,
+                modeMatchToken: matched.modeMatchToken
             )
         }
 
@@ -841,16 +839,31 @@ private enum PrivateDisplayTransportAPI {
     }
 
     static func apply(displayID: CGDirectDisplayID, option: DisplayTransportOption) -> Bool {
-        guard let descriptor = option.modeDescriptor else { return false }
         guard let display = cadDisplay(displayID: displayID) else { return false }
         guard let modes = display.value(forKey: "availableModes") as? [NSObject] else { return false }
-        guard let targetMode = modes.first(where: { String(describing: $0) == descriptor }) else { return false }
+
+        let targetMode: NSObject?
+        if let modeMatchToken = option.modeMatchToken {
+            targetMode = modes.first { privateRepresentationHex(for: $0) == modeMatchToken }
+        } else if let descriptor = option.modeDescriptor {
+            targetMode = modes.first { String(describing: $0) == descriptor }
+        } else {
+            targetMode = nil
+        }
+
+        guard let targetMode else { return false }
 
         _ = display.perform(NSSelectorFromString("setCurrentMode:"), with: targetMode)
         _ = display.perform(NSSelectorFromString("update"))
 
         guard let currentMode = display.value(forKey: "currentMode") as? NSObject else { return false }
-        return String(describing: currentMode) == descriptor
+        if let modeMatchToken = option.modeMatchToken {
+            return privateRepresentationHex(for: currentMode) == modeMatchToken
+        }
+        if let descriptor = option.modeDescriptor {
+            return String(describing: currentMode) == descriptor
+        }
+        return false
     }
 
     private static func cadDisplay(displayID: CGDirectDisplayID) -> NSObject? {
@@ -864,6 +877,13 @@ private enum PrivateDisplayTransportAPI {
     private static func intValue(_ value: Any?) -> Int? {
         if let number = value as? NSNumber { return number.intValue }
         return value as? Int
+    }
+
+    private static func privateRepresentationHex(for mode: NSObject) -> String? {
+        guard let data = mode.perform(NSSelectorFromString("copyPrivateRepresentation"))?.takeRetainedValue() as? Data else {
+            return nil
+        }
+        return data.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func parseModeDescriptor(_ descriptor: String) -> ParsedPrivateTransportMode? {
