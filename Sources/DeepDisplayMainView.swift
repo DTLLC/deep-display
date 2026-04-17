@@ -58,6 +58,10 @@ struct DeepDisplayMainView: View {
                         displayOverrideService: appController.displayOverrideService,
                         resetToken: draftResetToken,
                         onDraftChange: { draft in
+                            if draft != nil,
+                               appController.modeChangeCoordinator.pendingChange != nil {
+                                appController.modeChangeCoordinator.confirmPendingChange()
+                            }
                             self.pendingSelection = draft
                         }
                     )
