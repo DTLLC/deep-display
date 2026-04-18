@@ -57,13 +57,7 @@ struct DeepDisplayMainView: View {
                         modeChangeCoordinator: appController.modeChangeCoordinator,
                         displayOverrideService: appController.displayOverrideService,
                         resetToken: draftResetToken,
-                        onDraftChange: { draft in
-                            if draft != nil,
-                               appController.modeChangeCoordinator.pendingChange != nil {
-                                appController.modeChangeCoordinator.confirmPendingChange()
-                            }
-                            self.pendingSelection = draft
-                        }
+                        onDraftChange: handleDraftChange(_:)
                     )
                 } else {
                     ContentUnavailableView(
@@ -137,6 +131,16 @@ struct DeepDisplayMainView: View {
     private func dismissPendingSelection() {
         pendingSelection = nil
         draftResetToken += 1
+    }
+
+    private func handleDraftChange(_ draft: PendingDisplaySelection?) {
+        // A new draft means the previous live change is now the accepted base
+        // state, so stale keep/revert UI should disappear immediately.
+        if draft != nil,
+           appController.modeChangeCoordinator.pendingChange != nil {
+            appController.modeChangeCoordinator.confirmPendingChange()
+        }
+        pendingSelection = draft
     }
 }
 

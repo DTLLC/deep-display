@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 
+/// Owns long-lived app services and keeps selection state stable as displays
+/// appear, disappear, or refresh.
 @Observable
 @MainActor
 final class AppController {
@@ -10,8 +12,6 @@ final class AppController {
     let displayOverrideService: DisplayOverrideService
     let modeChangeCoordinator: ModeChangeCoordinator
     var selectedDisplayID: UInt32?
-
-    private var displayObserverID: UUID?
 
     init(
         displayService: DisplayService? = nil,
@@ -38,7 +38,7 @@ final class AppController {
 
         self.displayService.synthesizeHiDPIForEligibleModes = settingsStore.settings.synthesizeHiDPIForEligibleModes
         self.displayService.start()
-        self.displayObserverID = self.displayService.addObserver { [weak self] _ in
+        self.displayService.addObserver { [weak self] _ in
             self?.synchronizeSelectionIfNeeded()
         }
         synchronizeSelectionIfNeeded()

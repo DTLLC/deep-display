@@ -287,15 +287,11 @@ struct Preset: Identifiable, Codable, Equatable {
 }
 
 struct AppSettings: Codable, Equatable {
-    var launchAtLogin: Bool
-    var openHotkeyEnabled: Bool
     var autoRevertTimeout: TimeInterval
     var showUnsafeModes: Bool
     var synthesizeHiDPIForEligibleModes: Bool
 
     static let `default` = AppSettings(
-        launchAtLogin: false,
-        openHotkeyEnabled: false,
         autoRevertTimeout: 15,
         showUnsafeModes: true,
         synthesizeHiDPIForEligibleModes: true

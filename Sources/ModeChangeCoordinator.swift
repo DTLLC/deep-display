@@ -3,6 +3,8 @@ import CoreGraphics
 import Foundation
 import Observation
 
+/// Coordinates user-triggered display changes, including timed confirmation,
+/// fallback restoration, and virtual-resolution helper flows.
 @Observable
 @MainActor
 final class ModeChangeCoordinator {
