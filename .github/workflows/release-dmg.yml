@@ -1,0 +1,50 @@
+name: Release DMG
+
+on:
+  push:
+    branches:
+      - release
+
+permissions:
+  contents: write
+
+jobs:
+  release-dmg:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release metadata
+        run: |
+          version="$(./scripts/read_version.sh)"
+          build_version="${GITHUB_RUN_NUMBER}"
+          release_tag="v${version}-build.${build_version}"
+          release_title="Deep Display ${version} (${build_version})"
+          dmg_name="Deep-Display-${version}+${build_version}.dmg"
+          {
+            echo "DEEPDISPLAY_MARKETING_VERSION=${version}"
+            echo "DEEPDISPLAY_BUILD_VERSION=${build_version}"
+            echo "RELEASE_TAG=${release_tag}"
+            echo "RELEASE_TITLE=${release_title}"
+            echo "RELEASE_DMG_NAME=${dmg_name}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Make scripts executable
+        run: chmod +x ./scripts/*.sh ./scripts/render_icon.swift
+
+      - name: Build DMG
+        run: ./scripts/create_dmg.sh
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${RELEASE_TAG}" \
+            --target "${GITHUB_SHA}" \
+            --title "${RELEASE_TITLE}" \
+            --notes "Automated private release from the release branch." \
+            ".dist/${RELEASE_DMG_NAME}"
