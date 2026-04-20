@@ -201,31 +201,40 @@ struct VirtualResolutionWindowView: View {
     var body: some View {
         Group {
             if let display = appController.selectedDisplay {
+                let installationState = appController.displayOverrideService.installationState(for: display)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(display.name)
                             .font(.title2.weight(.semibold))
 
-                        Text("Install or reset vHiDPI entries for selected display. No full machine reboot needed. Reconnect display or log out to reload desktop session.")
+                        Text(virtualResolutionDescription(for: installationState))
                             .foregroundStyle(.secondary)
 
                         HStack(spacing: 12) {
                             SummaryChip(title: "Display", value: "\(display.id)")
                             SummaryChip(title: "vHiDPI Modes", value: "\(installableModeCount(for: display))")
-                            SummaryChip(title: "Reload", value: "Log out")
+                            SummaryChip(title: "Status", value: installationStatusLabel(for: installationState))
                         }
 
                         HStack(spacing: 12) {
-                            Button("Install Virtual Resolutions") {
-                                appController.modeChangeCoordinator.installVirtualResolutions(displayID: display.id)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(installableModeCount(for: display) == 0)
+                            switch installationState {
+                            case .unavailable:
+                                Button("No Virtual Resolutions Available") {}
+                                    .buttonStyle(.bordered)
+                                    .disabled(true)
 
-                            Button("Reset Virtual Resolutions") {
-                                appController.modeChangeCoordinator.resetVirtualResolutions(displayID: display.id)
+                            case .notInstalled:
+                                Button("Install Virtual Resolutions") {
+                                    appController.modeChangeCoordinator.installVirtualResolutions(displayID: display.id)
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                            case .installed:
+                                Button("Uninstall Virtual Resolutions") {
+                                    appController.modeChangeCoordinator.resetVirtualResolutions(displayID: display.id)
+                                }
+                                .buttonStyle(.borderedProminent)
                             }
-                            .buttonStyle(.bordered)
 
                             Button("Reload Desktop Session") {
                                 appController.modeChangeCoordinator.reloadDesktopSession()
@@ -260,6 +269,28 @@ struct VirtualResolutionWindowView: View {
 
     private func installableModeCount(for display: DisplaySnapshot) -> Int {
         display.availableModes.filter { $0.requiresOverrideInstall && $0.isHiDPI }.count
+    }
+
+    private func installationStatusLabel(for state: VirtualResolutionInstallationState) -> String {
+        switch state {
+        case .unavailable:
+            return "Unavailable"
+        case .notInstalled:
+            return "Not Installed"
+        case .installed:
+            return "Installed"
+        }
+    }
+
+    private func virtualResolutionDescription(for state: VirtualResolutionInstallationState) -> String {
+        switch state {
+        case .unavailable:
+            return "This display does not currently have generated vHiDPI entries to install."
+        case .notInstalled:
+            return "Virtual resolutions are currently not installed for this display. Install them before trying to use vHiDPI modes after a restart or reconnect."
+        case .installed:
+            return "Virtual resolutions are installed for this display. You can uninstall them if you want to remove the generated vHiDPI entries, and log out or reconnect the display when macOS needs to reload overrides."
+        }
     }
 }
 

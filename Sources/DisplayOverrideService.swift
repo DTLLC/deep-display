@@ -60,6 +60,18 @@ final class DisplayOverrideService {
         return .notInstalled
     }
 
+    func installationState(for display: DisplaySnapshot) -> VirtualResolutionInstallationState {
+        let installableModes = display.availableModes.filter { $0.requiresOverrideInstall && $0.isHiDPI }
+        guard !installableModes.isEmpty else { return .unavailable }
+
+        let descriptor = descriptor(for: display)
+        if let installedURL = installedOverrideURL(for: descriptor) {
+            return .installed(installedURL)
+        }
+
+        return .notInstalled
+    }
+
     func resetVirtualResolutions(for display: DisplaySnapshot) throws -> URL? {
         let descriptor = descriptor(for: display)
         let installedURL = URL(fileURLWithPath: "/Library/Displays/Contents/Resources/Overrides", isDirectory: true)
@@ -312,6 +324,12 @@ enum VirtualResolutionActivationStatus: Equatable {
     case notRequired
     case notInstalled
     case installedNeedsDesktopReload(URL)
+}
+
+enum VirtualResolutionInstallationState: Equatable {
+    case unavailable
+    case notInstalled
+    case installed(URL)
 }
 
 private struct DisplayOverrideDescriptor {
