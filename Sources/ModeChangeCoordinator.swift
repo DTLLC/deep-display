@@ -9,7 +9,6 @@ import Observation
 @MainActor
 final class ModeChangeCoordinator {
     private let displayService: DisplayService
-    private let presetStore: PresetStore
     private let settingsStore: SettingsStore
     private let displayOverrideService: DisplayOverrideService
 
@@ -21,12 +20,10 @@ final class ModeChangeCoordinator {
 
     init(
         displayService: DisplayService,
-        presetStore: PresetStore,
         settingsStore: SettingsStore,
         displayOverrideService: DisplayOverrideService
     ) {
         self.displayService = displayService
-        self.presetStore = presetStore
         self.settingsStore = settingsStore
         self.displayOverrideService = displayOverrideService
     }
@@ -57,28 +54,6 @@ final class ModeChangeCoordinator {
             )
         } catch {
             lastErrorMessage = "Unable to switch display mode: \(error.localizedDescription)"
-        }
-    }
-
-    func applyPreset(_ preset: Preset) {
-        let currentDisplays = displayService.displays
-        let fallbacks = currentDisplays.map {
-            DisplayConfiguration(displayID: $0.id, displayName: $0.name, mode: $0.currentMode)
-        }
-
-        do {
-            try presetStore.updatePreset(id: preset.id) { storedPreset in
-                storedPreset.updatedAt = Date()
-                storedPreset.fallbackConfigurations = fallbacks
-            }
-
-            try performChange(
-                summary: "Confirm preset \(preset.name)",
-                targets: preset.configurations,
-                fallbacks: fallbacks
-            )
-        } catch {
-            lastErrorMessage = "Unable to apply preset: \(error.localizedDescription)"
         }
     }
 

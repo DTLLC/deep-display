@@ -85,12 +85,6 @@ struct DeepDisplayMainView: View {
                 Button("Virtual Resolutions") {
                     openWindow(id: "virtual-resolutions")
                 }
-
-                PresetMenu(
-                    presetStore: appController.presetStore,
-                    displayService: appController.displayService,
-                    applyPreset: appController.modeChangeCoordinator.applyPreset(_:)
-                )
             }
         }
     }
@@ -193,10 +187,6 @@ struct WorkspaceSettingsWindowView: View {
             Section("Workspace") {
                 LabeledContent("Displays") {
                     Text("\(appController.displayService.displays.count)")
-                }
-
-                LabeledContent("Saved presets") {
-                    Text("\(appController.presetStore.presets.count)")
                 }
             }
         }
@@ -635,40 +625,6 @@ private struct DisplayControlCard: View {
 
     private func publishDraftState() {
         onDraftChange(pendingSelection)
-    }
-}
-
-private struct PresetMenu: View {
-    let presetStore: PresetStore
-    let displayService: DisplayService
-    let applyPreset: (Preset) -> Void
-
-    var body: some View {
-        Menu("Presets") {
-            Button("Save Current Setup") {
-                let nextIndex = presetStore.presets.count + 1
-                presetStore.createPreset(named: "Preset \(nextIndex)", from: displayService.displays)
-            }
-
-            Divider()
-
-            if presetStore.presets.isEmpty {
-                Button("No saved presets") {}
-                    .disabled(true)
-            } else {
-                ForEach(presetStore.presets) { preset in
-                    Menu(preset.name) {
-                        Button("Apply") {
-                            applyPreset(preset)
-                        }
-
-                        Button("Delete", role: .destructive) {
-                            presetStore.deletePreset(id: preset.id)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

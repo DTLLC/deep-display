@@ -277,15 +277,6 @@ struct DisplayConfiguration: Codable, Equatable {
     let mode: DisplayModeSnapshot?
 }
 
-struct Preset: Identifiable, Codable, Equatable {
-    let id: UUID
-    var name: String
-    var createdAt: Date
-    var updatedAt: Date
-    var configurations: [DisplayConfiguration]
-    var fallbackConfigurations: [DisplayConfiguration]
-}
-
 struct AppSettings: Codable, Equatable {
     var autoRevertTimeout: TimeInterval
     var showUnsafeModes: Bool

@@ -7,7 +7,6 @@ import Observation
 @MainActor
 final class AppController {
     let displayService: DisplayService
-    let presetStore: PresetStore
     let settingsStore: SettingsStore
     let displayOverrideService: DisplayOverrideService
     let modeChangeCoordinator: ModeChangeCoordinator
@@ -15,23 +14,19 @@ final class AppController {
 
     init(
         displayService: DisplayService? = nil,
-        presetStore: PresetStore? = nil,
         settingsStore: SettingsStore? = nil,
         displayOverrideService: DisplayOverrideService? = nil
     ) {
         let displayService = displayService ?? DisplayService()
-        let presetStore = presetStore ?? PresetStore()
         let settingsStore = settingsStore ?? SettingsStore()
         let displayOverrideService = displayOverrideService ?? DisplayOverrideService()
         let modeChangeCoordinator = ModeChangeCoordinator(
             displayService: displayService,
-            presetStore: presetStore,
             settingsStore: settingsStore,
             displayOverrideService: displayOverrideService
         )
 
         self.displayService = displayService
-        self.presetStore = presetStore
         self.settingsStore = settingsStore
         self.displayOverrideService = displayOverrideService
         self.modeChangeCoordinator = modeChangeCoordinator
