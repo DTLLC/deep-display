@@ -49,6 +49,7 @@ struct DeepDisplayMainView: View {
 
             NavigationSplitView {
                 DisplaySidebar(appController: appController)
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
             } detail: {
                 if let display = appController.selectedDisplay {
                     DisplayDetailView(
