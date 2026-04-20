@@ -4,6 +4,7 @@ import SwiftUI
 final class DeepDisplayApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.processName = "Deep Display"
+        NSApp.applicationIconImage = DeepDisplayIcon.makeAppIcon()
         NSApp.setActivationPolicy(.regular)
     }
 
