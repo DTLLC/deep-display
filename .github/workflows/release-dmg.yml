@@ -48,3 +48,10 @@ jobs:
             --title "${RELEASE_TITLE}" \
             --notes "Automated private release from the release branch." \
             ".dist/${RELEASE_DMG_NAME}"
+
+      - name: Delete superseded patch releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x ./scripts/*.sh ./scripts/render_icon.swift
+          ./scripts/cleanup_releases.sh
