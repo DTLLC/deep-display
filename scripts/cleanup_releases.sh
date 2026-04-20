@@ -40,69 +40,68 @@ if [[ -z "${repo}" ]]; then
   exit 1
 fi
 
-mapfile -t release_lines < <(
-  gh api "repos/${repo}/releases?per_page=100" --paginate \
-    --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv'
-)
+temp_dir="$(mktemp -d)"
+trap 'rm -rf "${temp_dir}"' EXIT
 
-declare -A keep_patch_by_line
-declare -A keep_build_by_line
-declare -A keep_tag_by_line
-declare -a candidate_tags=()
+candidates_file="${temp_dir}/candidates.tsv"
+sorted_file="${temp_dir}/sorted.tsv"
+keep_file="${temp_dir}/keep.txt"
+delete_file="${temp_dir}/delete.txt"
 
-for line in "${release_lines[@]}"; do
-  IFS=$'\t' read -r tag_name is_draft is_prerelease <<< "${line}"
-
+gh api "repos/${repo}/releases?per_page=100" --paginate \
+  --jq '.[] | [.tag_name, .draft, .prerelease] | @tsv' |
+while IFS=$'\t' read -r tag_name is_draft is_prerelease; do
   if [[ "${is_draft}" == "true" || "${is_prerelease}" == "true" ]]; then
     continue
   fi
 
   if [[ "${tag_name}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-build\.([0-9]+)$ ]]; then
-    major="${BASH_REMATCH[1]}"
-    minor="${BASH_REMATCH[2]}"
-    patch="${BASH_REMATCH[3]}"
-    build="${BASH_REMATCH[4]}"
-    line_key="${major}.${minor}"
-    candidate_tags+=("${tag_name}")
-
-    current_keep_patch="${keep_patch_by_line[$line_key]:--1}"
-    current_keep_build="${keep_build_by_line[$line_key]:--1}"
-    if (( patch > current_keep_patch )) || { (( patch == current_keep_patch )) && (( build > current_keep_build )); }; then
-      keep_patch_by_line["${line_key}"]="${patch}"
-      keep_build_by_line["${line_key}"]="${build}"
-      keep_tag_by_line["${line_key}"]="${tag_name}"
-    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "${BASH_REMATCH[1]}" \
+      "${BASH_REMATCH[2]}" \
+      "${BASH_REMATCH[3]}" \
+      "${BASH_REMATCH[4]}" \
+      "${tag_name}" >> "${candidates_file}"
   fi
 done
 
-declare -a delete_tags=()
-for tag_name in "${candidate_tags[@]}"; do
-  if [[ "${tag_name}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-build\.([0-9]+)$ ]]; then
-    line_key="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
-    if [[ "${keep_tag_by_line[$line_key]}" != "${tag_name}" ]]; then
-      delete_tags+=("${tag_name}")
-    fi
-  fi
-done
+if [[ ! -f "${candidates_file}" ]]; then
+  echo "No matching patch releases found."
+  exit 0
+fi
 
-if [[ "${#delete_tags[@]}" -eq 0 ]]; then
+sort -t $'\t' -k1,1n -k2,2n -k3,3nr -k4,4nr "${candidates_file}" > "${sorted_file}"
+
+last_line_key=""
+while IFS=$'\t' read -r major minor patch build tag_name; do
+  line_key="${major}.${minor}"
+  if [[ "${line_key}" != "${last_line_key}" ]]; then
+    printf '%s\t%s\n' "${line_key}" "${tag_name}" >> "${keep_file}"
+    last_line_key="${line_key}"
+  else
+    printf '%s\n' "${tag_name}" >> "${delete_file}"
+  fi
+done < "${sorted_file}"
+
+if [[ ! -f "${delete_file}" ]]; then
   echo "No older patch releases to delete."
   exit 0
 fi
 
 printf 'Keeping latest patch per minor line:\n'
-for line_key in "${!keep_tag_by_line[@]}"; do
-  printf '  %s -> %s\n' "${line_key}" "${keep_tag_by_line[$line_key]}"
-done | sort
+sort "${keep_file}" | while IFS=$'\t' read -r line_key tag_name; do
+  printf '  %s -> %s\n' "${line_key}" "${tag_name}"
+done
 
 printf 'Deleting old releases:\n'
-printf '  %s\n' "${delete_tags[@]}"
+while IFS= read -r tag_name; do
+  printf '  %s\n' "${tag_name}"
+done < "${delete_file}"
 
 if [[ "${dry_run}" -eq 1 ]]; then
   exit 0
 fi
 
-for tag_name in "${delete_tags[@]}"; do
+while IFS= read -r tag_name; do
   gh release delete "${tag_name}" --cleanup-tag --yes --repo "${repo}"
-done
-
+done < "${delete_file}"
