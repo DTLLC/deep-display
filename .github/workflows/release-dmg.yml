@@ -25,12 +25,14 @@ jobs:
           release_tag="v${version}-build.${build_version}"
           release_title="Deep Display ${version} (${build_version})"
           dmg_name="Deep-Display-${version}+${build_version}.dmg"
+          latest_dmg_name="Deep-Display-latest.dmg"
           {
             echo "DEEPDISPLAY_MARKETING_VERSION=${version}"
             echo "DEEPDISPLAY_BUILD_VERSION=${build_version}"
             echo "RELEASE_TAG=${release_tag}"
             echo "RELEASE_TITLE=${release_title}"
             echo "RELEASE_DMG_NAME=${dmg_name}"
+            echo "LATEST_RELEASE_DMG_NAME=${latest_dmg_name}"
           } >> "${GITHUB_ENV}"
 
       - name: Make scripts executable
@@ -38,6 +40,9 @@ jobs:
 
       - name: Build DMG
         run: ./scripts/create_dmg.sh
+
+      - name: Prepare Homebrew DMG alias
+        run: cp ".dist/${RELEASE_DMG_NAME}" ".dist/${LATEST_RELEASE_DMG_NAME}"
 
       - name: Create GitHub release
         env:
@@ -47,7 +52,8 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "${RELEASE_TITLE}" \
             --notes "Automated private release from the release branch." \
-            ".dist/${RELEASE_DMG_NAME}"
+            ".dist/${RELEASE_DMG_NAME}" \
+            ".dist/${LATEST_RELEASE_DMG_NAME}"
 
       - name: Delete superseded patch releases
         env:
