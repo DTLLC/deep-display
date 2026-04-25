@@ -1,6 +1,6 @@
 cask "deep-display" do
-  version "0.2.6,5"
-  sha256 "0d491a3ff7410daae01881880dab019876abd202f2c97a93eaa89714fd16f357"
+  version "0.2.7,6"
+  sha256 "0a220df1c8a641155b32d3b8484b35fa6dd878514a3a2177315519e75675fe6d"
 
   gh_binary = ENV["GH"]
   gh_binary ||= `/bin/zsh -lc 'command -v gh' 2>/dev/null`.strip
