@@ -19,7 +19,7 @@ This script:
 
 Hard policy:
 - releases require a clean worktree, including untracked files
-- releases fast-forward the current branch from origin before bumping
+- releases integrate origin before bumping so CI tap updates are included
 - --dry-run reports the stop condition without mutating anything
 - after pushing, interactive runs can press Enter at any time while waiting to stop watching locally
 EOF
@@ -191,15 +191,8 @@ sync_current_branch() {
     return 0
   fi
 
-  cat >&2 <<EOF
-${current_branch} has diverged from ${remote_ref}.
-
-Run:
-  git pull --rebase origin ${current_branch}
-
-Then rerun the release.
-EOF
-  exit 1
+  echo "${current_branch} has diverged from ${remote_ref}; merging ${remote_ref} before release bump..."
+  git merge --no-edit "${remote_ref}"
 }
 
 for arg in "$@"; do
@@ -273,7 +266,7 @@ Release workflow wait: enabled
 
 Would run:
   git fetch origin ${current_branch}
-  git merge --ff-only origin/${current_branch} # when local branch is behind
+  git merge origin/${current_branch} # when origin has CI tap updates
   ./scripts/bump_version.sh ${bump_kind}
   git add VERSION
   git commit -m "Bump version to ${next_version}"
