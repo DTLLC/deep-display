@@ -7,12 +7,12 @@ Deep Display is distributed from this repository as a Homebrew cask and a GitHub
 This repository is its own tap. Install from it directly:
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN=YOUR_TOKEN
+gh auth login
 brew tap JasCodes/deepdisplay https://github.com/JasCodes/deepdisplay
 brew install --cask deep-display
 ```
 
-The token is required because the DMG is served from a private GitHub release asset.
+Authentication is required because the DMG is served from a private GitHub release asset. The cask uses `HOMEBREW_GITHUB_API_TOKEN` when it is set, otherwise it falls back to `gh auth token`.
 If the repository itself is private, authenticate Git first or tap with an SSH URL instead:
 
 ```bash
@@ -22,7 +22,7 @@ brew tap JasCodes/deepdisplay git@github.com:JasCodes/deepdisplay.git
 To upgrade later:
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN=YOUR_TOKEN
+gh auth login
 brew upgrade --cask deep-display
 ```
 

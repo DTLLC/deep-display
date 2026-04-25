@@ -3,6 +3,8 @@ cask "deep-display" do
   sha256 "c57d2ebedb3ee6654062d080cd8d677ce2d10de7cbae9656dda2d90561d9ee0e"
 
   github_token = ENV["HOMEBREW_GITHUB_API_TOKEN"]
+  github_token ||= `gh auth token 2>/dev/null`.strip if system("command -v gh >/dev/null 2>&1")
+  github_token = nil if github_token&.empty?
 
   url "https://github.com/JasCodes/deepdisplay/releases/download/v#{version.before_comma}-build.#{version.after_comma}/Deep-Display-latest.dmg",
       verified: "github.com/JasCodes/deepdisplay/",
@@ -21,12 +23,13 @@ cask "deep-display" do
     <<~EOS
       This cask downloads a private GitHub release asset.
 
-      Set HOMEBREW_GITHUB_API_TOKEN to a GitHub token with read access to
-      JasCodes/deepdisplay before installing or upgrading:
+      Authenticate GitHub CLI before installing or upgrading:
 
-        export HOMEBREW_GITHUB_API_TOKEN=YOUR_TOKEN
+        gh auth login
         brew tap JasCodes/deepdisplay https://github.com/JasCodes/deepdisplay
         brew install --cask deep-display
+
+      You can also set HOMEBREW_GITHUB_API_TOKEN directly if you prefer.
     EOS
   end
 end
