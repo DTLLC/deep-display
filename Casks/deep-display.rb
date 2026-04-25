@@ -1,6 +1,6 @@
 cask "deep-display" do
-  version "0.2.3,3"
-  sha256 "c57d2ebedb3ee6654062d080cd8d677ce2d10de7cbae9656dda2d90561d9ee0e"
+  version "0.2.4,4"
+  sha256 "598cf4218f1ae64372f92aac9155eaa1b63ea8af9529f7bfdbbcd847878a19b7"
 
   github_token = ENV["HOMEBREW_GITHUB_API_TOKEN"]
   github_token ||= `gh auth token 2>/dev/null`.strip if system("command -v gh >/dev/null 2>&1")
