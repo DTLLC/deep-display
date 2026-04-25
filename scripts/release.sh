@@ -49,9 +49,41 @@ find_release_run_id() {
   return 1
 }
 
+github_repo_slug() {
+  local remote_url slug
+
+  remote_url="$(git config --get remote.origin.url || true)"
+  case "${remote_url}" in
+    git@github.com:*.git)
+      slug="${remote_url#git@github.com:}"
+      printf '%s\n' "${slug%.git}"
+      ;;
+    git@github.com:*)
+      printf '%s\n' "${remote_url#git@github.com:}"
+      ;;
+    https://github.com/*.git)
+      slug="${remote_url#https://github.com/}"
+      printf '%s\n' "${slug%.git}"
+      ;;
+    https://github.com/*)
+      printf '%s\n' "${remote_url#https://github.com/}"
+      ;;
+  esac
+}
+
+github_actions_run_url() {
+  local run_id="$1"
+  local repo_slug
+
+  repo_slug="$(github_repo_slug)"
+  if [[ -n "${repo_slug}" ]]; then
+    printf 'https://github.com/%s/actions/runs/%s\n' "${repo_slug}" "${run_id}"
+  fi
+}
+
 maybe_wait_for_release() {
   local release_sha="$1"
-  local run_id watcher_pid watcher_status
+  local run_id run_url watcher_pid skip_pid watcher_status skip_file
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "Release pushed, but GitHub CLI is not installed so the workflow watch was skipped." >&2
@@ -69,28 +101,62 @@ maybe_wait_for_release() {
     return 0
   fi
 
+  run_url="$(github_actions_run_url "${run_id}")"
+  if [[ -n "${run_url}" ]]; then
+    echo "GitHub Actions: ${run_url}"
+  fi
+
   if [[ -t 1 && -r /dev/tty ]]; then
     echo "Watching Release DMG workflow run ${run_id}. Press Enter at any time to stop waiting locally."
     gh run watch "${run_id}" --exit-status &
     watcher_pid=$!
+    skip_file="$(mktemp)"
 
-    while kill -0 "${watcher_pid}" 2>/dev/null; do
-      if IFS= read -r -t 1 _skip_wait </dev/tty; then
-        echo
-        echo "Stopped waiting locally. The GitHub Actions run will continue on GitHub."
-        kill "${watcher_pid}" 2>/dev/null || true
-        wait "${watcher_pid}" 2>/dev/null || true
-        return 0
-      fi
-    done
+    (
+      IFS= read -r _skip_wait </dev/tty
+      : > "${skip_file}"
+      kill "${watcher_pid}" 2>/dev/null || true
+    ) &
+    skip_pid=$!
 
+    set +e
     wait "${watcher_pid}"
     watcher_status=$?
+    set -e
+
+    if kill -0 "${skip_pid}" 2>/dev/null; then
+      kill "${skip_pid}" 2>/dev/null || true
+      wait "${skip_pid}" 2>/dev/null || true
+    fi
+
+    if [[ -s "${skip_file}" ]]; then
+      rm -f "${skip_file}"
+      echo
+      echo "Stopped waiting locally. The GitHub Actions run will continue on GitHub."
+      return 0
+    fi
+    rm -f "${skip_file}"
+
+    if [[ "${watcher_status}" -eq 0 ]]; then
+      echo "Release DMG workflow completed successfully."
+    else
+      echo "Release DMG workflow finished with status ${watcher_status}." >&2
+    fi
     return "${watcher_status}"
   fi
 
   echo "Watching Release DMG workflow run ${run_id}..."
+  set +e
   gh run watch "${run_id}" --exit-status
+  watcher_status=$?
+  set -e
+
+  if [[ "${watcher_status}" -eq 0 ]]; then
+    echo "Release DMG workflow completed successfully."
+  else
+    echo "Release DMG workflow finished with status ${watcher_status}." >&2
+  fi
+  return "${watcher_status}"
 }
 
 for arg in "$@"; do
