@@ -2,14 +2,19 @@ cask "deep-display" do
   version "0.2.6,5"
   sha256 "0d491a3ff7410daae01881880dab019876abd202f2c97a93eaa89714fd16f357"
 
+  gh_binary = ENV["GH"]
+  gh_binary ||= `/bin/zsh -lc 'command -v gh' 2>/dev/null`.strip
+  gh_binary ||= `/bin/bash -lc 'command -v gh' 2>/dev/null`.strip
+  gh_binary = nil if gh_binary&.empty?
+
   github_token = ENV["HOMEBREW_GITHUB_API_TOKEN"]
-  github_token ||= `gh auth token 2>/dev/null`.strip if system("command -v gh >/dev/null 2>&1")
+  github_token ||= `"#{gh_binary}" auth token 2>/dev/null`.strip if gh_binary
   github_token = nil if github_token&.empty?
   raise "Run `gh auth login` before installing this private cask." if github_token.nil?
 
   ENV["GH_TOKEN"] ||= github_token
   release_tag = "v#{version.before_comma}-build.#{version.after_comma}"
-  asset_api_url = `gh api repos/JasCodes/deepdisplay/releases/tags/#{release_tag} --jq '.assets[] | select(.name == "Deep-Display-latest.dmg") | .url' 2>/dev/null`.strip
+  asset_api_url = `"#{gh_binary}" api repos/JasCodes/deepdisplay/releases/tags/#{release_tag} --jq '.assets[] | select(.name == "Deep-Display-latest.dmg") | .url' 2>/dev/null`.strip if gh_binary
   raise "Could not find Deep-Display-latest.dmg on #{release_tag}." if asset_api_url.empty?
 
   url asset_api_url,
