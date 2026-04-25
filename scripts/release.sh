@@ -21,7 +21,7 @@ Hard policy:
 - releases require a clean worktree, including untracked files
 - releases integrate origin before bumping so CI tap updates are included
 - --dry-run reports the stop condition without mutating anything
-- after pushing, interactive runs can press Enter at any time while waiting to stop watching locally
+- release waiting is handled by gh run watch
 EOF
 }
 
@@ -84,7 +84,7 @@ github_actions_run_url() {
 
 maybe_wait_for_release() {
   local release_sha="$1"
-  local run_id run_url watcher_pid skip_pid watcher_status skip_file
+  local run_id run_url watcher_status
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "Release pushed, but GitHub CLI is not installed so the workflow watch was skipped." >&2
@@ -105,45 +105,6 @@ maybe_wait_for_release() {
   run_url="$(github_actions_run_url "${run_id}")"
   if [[ -n "${run_url}" ]]; then
     echo "GitHub Actions: ${run_url}"
-  fi
-
-  if [[ -t 1 && -r /dev/tty ]]; then
-    echo "Watching Release DMG workflow run ${run_id}. Press Enter at any time to stop waiting locally."
-    gh run watch "${run_id}" --exit-status &
-    watcher_pid=$!
-    skip_file="$(mktemp)"
-
-    (
-      IFS= read -r _skip_wait </dev/tty
-      : > "${skip_file}"
-      kill "${watcher_pid}" 2>/dev/null || true
-    ) &
-    skip_pid=$!
-
-    set +e
-    wait "${watcher_pid}"
-    watcher_status=$?
-    set -e
-
-    if kill -0 "${skip_pid}" 2>/dev/null; then
-      kill "${skip_pid}" 2>/dev/null || true
-      wait "${skip_pid}" 2>/dev/null || true
-    fi
-
-    if [[ -s "${skip_file}" ]]; then
-      rm -f "${skip_file}"
-      echo
-      echo "Stopped waiting locally. The GitHub Actions run will continue on GitHub."
-      return 0
-    fi
-    rm -f "${skip_file}"
-
-    if [[ "${watcher_status}" -eq 0 ]]; then
-      echo "Release DMG workflow completed successfully."
-    else
-      echo "Release DMG workflow finished with status ${watcher_status}." >&2
-    fi
-    return "${watcher_status}"
   fi
 
   echo "Watching Release DMG workflow run ${run_id}..."
@@ -274,7 +235,6 @@ Would run:
   git push origin HEAD:release
   gh run list --workflow "Release DMG" --branch release --commit <release-sha>
   gh run watch <run-id> --exit-status
-  allow Enter at any time to stop waiting locally
 EOF
   exit 0
 fi
