@@ -19,6 +19,7 @@ This script:
 
 Hard policy:
 - releases require a clean worktree, including untracked files
+- releases fast-forward the current branch from origin before bumping
 - --dry-run reports the stop condition without mutating anything
 - after pushing, interactive runs can press Enter at any time while waiting to stop watching locally
 EOF
@@ -159,6 +160,48 @@ maybe_wait_for_release() {
   return "${watcher_status}"
 }
 
+sync_current_branch() {
+  local current_branch="$1"
+  local remote_ref="origin/${current_branch}"
+  local local_head remote_head base
+
+  echo "Fetching origin/${current_branch}..."
+  git fetch origin "${current_branch}"
+
+  if ! git show-ref --verify --quiet "refs/remotes/${remote_ref}"; then
+    echo "No ${remote_ref} ref found; continuing without a pre-release fast-forward."
+    return 0
+  fi
+
+  local_head="$(git rev-parse HEAD)"
+  remote_head="$(git rev-parse "${remote_ref}")"
+  base="$(git merge-base HEAD "${remote_ref}")"
+
+  if [[ "${local_head}" == "${remote_head}" ]]; then
+    return 0
+  fi
+
+  if [[ "${base}" == "${local_head}" ]]; then
+    echo "Fast-forwarding ${current_branch} to ${remote_ref}..."
+    git merge --ff-only "${remote_ref}"
+    return 0
+  fi
+
+  if [[ "${base}" == "${remote_head}" ]]; then
+    return 0
+  fi
+
+  cat >&2 <<EOF
+${current_branch} has diverged from ${remote_ref}.
+
+Run:
+  git pull --rebase origin ${current_branch}
+
+Then rerun the release.
+EOF
+  exit 1
+}
+
 for arg in "$@"; do
   case "$arg" in
     --patch)
@@ -213,6 +256,10 @@ if [[ "${current_branch}" == "release" ]]; then
   exit 1
 fi
 
+if [[ "${dry_run}" -eq 0 ]]; then
+  sync_current_branch "${current_branch}"
+fi
+
 current_version="$(./scripts/read_version.sh)"
 next_version="$(./scripts/bump_version.sh "${bump_kind}" --print-only)"
 
@@ -225,6 +272,8 @@ Dirty tree handling: ${dirty_handling_summary}
 Release workflow wait: enabled
 
 Would run:
+  git fetch origin ${current_branch}
+  git merge --ff-only origin/${current_branch} # when local branch is behind
   ./scripts/bump_version.sh ${bump_kind}
   git add VERSION
   git commit -m "Bump version to ${next_version}"
