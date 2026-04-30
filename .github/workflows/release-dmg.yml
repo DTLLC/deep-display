@@ -11,6 +11,8 @@ permissions:
 jobs:
   release-dmg:
     runs-on: macos-latest
+    env:
+      BUNDLE_ID: bio.jas.DeepDisplay
 
     steps:
       - name: Checkout
@@ -38,8 +40,61 @@ jobs:
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh ./scripts/render_icon.swift
 
-      - name: Build DMG
+      - name: Install Codemagic CLI tools
+        run: |
+          python3 -m pip install --user --upgrade codemagic-cli-tools
+          echo "$(python3 -m site --user-base)/bin" >> "${GITHUB_PATH}"
+
+      - name: Create temporary keychain password
+        run: echo "KEYCHAIN_PASSWORD=$(uuidgen)" >> "${GITHUB_ENV}"
+
+      - name: Set up signing keychain
+        run: keychain initialize --password "@env:KEYCHAIN_PASSWORD"
+
+      - name: Fetch Developer ID signing files
+        env:
+          APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APPLE_APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+          CERTIFICATE_PRIVATE_KEY: ${{ secrets.APPLE_CERTIFICATE_PRIVATE_KEY }}
+        run: |
+          export APP_STORE_CONNECT_PRIVATE_KEY="$(printf '%s' "${APP_STORE_CONNECT_PRIVATE_KEY_BASE64}" | /usr/bin/base64 -d)"
+          app-store-connect fetch-signing-files "${BUNDLE_ID}" \
+            --platform MAC_OS \
+            --type MAC_APP_DIRECT \
+            --create
+          keychain add-certificates
+
+      - name: Resolve Developer ID signing identity
+        run: |
+          identity="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -n 1)"
+          if [[ -z "${identity}" ]]; then
+            echo "No Developer ID Application signing identity found." >&2
+            security find-identity -v -p codesigning >&2
+            exit 1
+          fi
+          echo "DEEPDISPLAY_CODESIGN_IDENTITY=${identity}" >> "${GITHUB_ENV}"
+
+      - name: Build signed DMG
         run: ./scripts/create_dmg.sh
+
+      - name: Notarize and staple DMG
+        env:
+          APPLE_APP_STORE_CONNECT_KEY_ID: ${{ secrets.APPLE_APP_STORE_CONNECT_KEY_ID }}
+          APPLE_APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APPLE_APP_STORE_CONNECT_ISSUER_ID }}
+          APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
+        run: |
+          key_path="${RUNNER_TEMP}/AuthKey_${APPLE_APP_STORE_CONNECT_KEY_ID}.p8"
+          printf '%s' "${APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64}" | /usr/bin/base64 -d > "${key_path}"
+
+          xcrun notarytool submit ".dist/${RELEASE_DMG_NAME}" \
+            --key "${key_path}" \
+            --key-id "${APPLE_APP_STORE_CONNECT_KEY_ID}" \
+            --issuer "${APPLE_APP_STORE_CONNECT_ISSUER_ID}" \
+            --wait
+
+          xcrun stapler staple ".dist/${RELEASE_DMG_NAME}"
+          xcrun stapler validate ".dist/${RELEASE_DMG_NAME}"
 
       - name: Prepare Homebrew DMG alias
         run: cp ".dist/${RELEASE_DMG_NAME}" ".dist/${LATEST_RELEASE_DMG_NAME}"
@@ -59,7 +114,7 @@ jobs:
           gh release create "${RELEASE_TAG}" \
             --target "${GITHUB_SHA}" \
             --title "${RELEASE_TITLE}" \
-            --notes "Automated private release from the release branch." \
+            --notes "Automated signed and notarized release from the release branch." \
             ".dist/${RELEASE_DMG_NAME}" \
             ".dist/${LATEST_RELEASE_DMG_NAME}"
 

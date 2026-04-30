@@ -16,7 +16,7 @@ app_bundle="$("${script_dir}/build_app.sh" | tail -n 1)"
 
 rm -rf "${dmg_dir}" "${dmg_path}"
 mkdir -p "${dmg_dir}"
-cp -R "${app_bundle}" "${dmg_dir}/${display_name}.app"
+/usr/bin/ditto "${app_bundle}" "${dmg_dir}/${display_name}.app"
 ln -sfn /Applications "${dmg_dir}/Applications"
 
 /usr/bin/hdiutil create \

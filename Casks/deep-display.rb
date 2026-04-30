@@ -2,48 +2,22 @@ cask "deep-display" do
   version "0.2.8,7"
   sha256 "de7be3dc7423675a6b5395f7d6cce1390d0ee6227fa2b7a34d21acfa18015399"
 
-  gh_binary = ENV["GH"]
-  gh_binary ||= `/bin/zsh -lc 'command -v gh' 2>/dev/null`.strip
-  gh_binary ||= `/bin/bash -lc 'command -v gh' 2>/dev/null`.strip
-  gh_binary = nil if gh_binary&.empty?
-
-  github_token = ENV["HOMEBREW_GITHUB_API_TOKEN"]
-  github_token ||= `"#{gh_binary}" auth token 2>/dev/null`.strip if gh_binary
-  github_token = nil if github_token&.empty?
-  raise "Run `gh auth login` before installing this private cask." if github_token.nil?
-
-  ENV["GH_TOKEN"] ||= github_token
-  release_tag = "v#{version.before_comma}-build.#{version.after_comma}"
-  asset_api_url = `"#{gh_binary}" api repos/JasCodes/deepdisplay/releases/tags/#{release_tag} --jq '.assets[] | select(.name == "Deep-Display-latest.dmg") | .url' 2>/dev/null`.strip if gh_binary
-  raise "Could not find Deep-Display-latest.dmg on #{release_tag}." if asset_api_url.empty?
-
-  url asset_api_url,
-      verified: "github.com/JasCodes/deepdisplay/",
-      header: [
-        "Accept: application/octet-stream",
-        "Authorization: Bearer #{github_token}",
-      ]
+  url "https://github.com/dtllc/deep-display/releases/download/v#{version.before_comma}-build.#{version.after_comma}/Deep-Display-latest.dmg",
+      verified: "github.com/dtllc/deep-display/"
   name "Deep Display"
   desc "Switch display modes, range, and virtual resolutions on macOS"
-  homepage "https://github.com/JasCodes/deepdisplay"
+  homepage "https://github.com/dtllc/deep-display"
 
   livecheck do
-    skip "Private release asset."
+    url "https://github.com/dtllc/deep-display/releases"
+    regex(/^v?(\d+(?:\.\d+)+)-build[._-]?(\d+)$/i)
+    strategy :github_latest do |json, regex|
+      match = json["tag_name"]&.match(regex)
+      next if match.nil?
+
+      "#{match[1]},#{match[2]}"
+    end
   end
 
   app "Deep Display.app"
-
-  caveats do
-    <<~EOS
-      This cask downloads a private GitHub release asset.
-
-      Authenticate GitHub CLI before installing or upgrading:
-
-        gh auth login
-        brew tap JasCodes/deepdisplay https://github.com/JasCodes/deepdisplay
-        brew install --cask deep-display
-
-      You can also set HOMEBREW_GITHUB_API_TOKEN directly if you prefer.
-    EOS
-  end
 end

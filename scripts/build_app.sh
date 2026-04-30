@@ -21,6 +21,7 @@ app_binary="${app_macos}/${product_name}"
 info_plist="${app_contents}/Info.plist"
 iconset_dir="${dist_dir}/AppIcon.iconset"
 icns_path="${app_resources}/${display_name}.icns"
+codesign_identity="${DEEPDISPLAY_CODESIGN_IDENTITY:-}"
 
 swift build -c release
 
@@ -70,5 +71,15 @@ cat > "${info_plist}" <<PLIST
 </plist>
 PLIST
 
-printf '%s\n' "${app_bundle}"
+if [[ -n "${codesign_identity}" ]]; then
+  /usr/bin/codesign \
+    --force \
+    --options runtime \
+    --timestamp \
+    --sign "${codesign_identity}" \
+    "${app_bundle}"
 
+  /usr/bin/codesign --verify --strict --verbose=2 "${app_bundle}"
+fi
+
+printf '%s\n' "${app_bundle}"
