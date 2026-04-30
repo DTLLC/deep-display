@@ -13,6 +13,8 @@ brew tap dtllc/deep-display https://github.com/dtllc/deep-display
 brew install --cask deep-display
 ```
 
+Use the explicit tap URL because this repository is not named `homebrew-deep-display`. The shorthand `brew install --cask dtllc/deep-display/deep-display` would only work for a conventional Homebrew tap repository.
+
 To upgrade later:
 
 ```bash

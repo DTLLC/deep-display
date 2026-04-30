@@ -42,8 +42,10 @@ jobs:
 
       - name: Install Codemagic CLI tools
         run: |
-          python3 -m pip install --user --upgrade codemagic-cli-tools
-          echo "$(python3 -m site --user-base)/bin" >> "${GITHUB_PATH}"
+          python3 -m venv "${RUNNER_TEMP}/codemagic-cli-tools"
+          "${RUNNER_TEMP}/codemagic-cli-tools/bin/python" -m pip install --upgrade pip
+          "${RUNNER_TEMP}/codemagic-cli-tools/bin/python" -m pip install --upgrade codemagic-cli-tools
+          echo "${RUNNER_TEMP}/codemagic-cli-tools/bin" >> "${GITHUB_PATH}"
 
       - name: Create temporary keychain password
         run: echo "KEYCHAIN_PASSWORD=$(uuidgen)" >> "${GITHUB_ENV}"
