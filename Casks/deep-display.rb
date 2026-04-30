@@ -1,6 +1,6 @@
 cask "deep-display" do
-  version "0.2.8,7"
-  sha256 "de7be3dc7423675a6b5395f7d6cce1390d0ee6227fa2b7a34d21acfa18015399"
+  version "0.2.11,10"
+  sha256 "2ce5f12a42933e0b17acd57415dbe5538f2b9d36b11e6ac82c36d1e1ee36bd93"
 
   url "https://github.com/dtllc/deep-display/releases/download/v#{version.before_comma}-build.#{version.after_comma}/Deep-Display-latest.dmg",
       verified: "github.com/dtllc/deep-display/"
