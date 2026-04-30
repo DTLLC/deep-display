@@ -37,10 +37,10 @@ The release workflow expects these GitHub Actions organization secrets:
 APPLE_APP_STORE_CONNECT_KEY_ID
 APPLE_APP_STORE_CONNECT_ISSUER_ID
 APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64
-APPLE_CERTIFICATE_PRIVATE_KEY
+APPLE_MAC_DEVELOPER_ID_CERT_PRIVATE_KEY
 ```
 
-`APPLE_CERTIFICATE_PRIVATE_KEY` is the shared certificate private key used by Codemagic CLI tools to fetch or create the Developer ID Application signing certificate. The workflow creates a temporary keychain password at runtime.
+`APPLE_MAC_DEVELOPER_ID_CERT_PRIVATE_KEY` is the shared certificate private key used by Codemagic CLI tools to fetch or create the Developer ID Application signing certificate. The workflow maps it to Codemagic's expected `CERTIFICATE_PRIVATE_KEY` environment variable and creates a temporary keychain password at runtime.
 
 ## Local build
 

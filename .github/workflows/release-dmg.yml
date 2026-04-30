@@ -58,7 +58,7 @@ jobs:
           APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APPLE_APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APPLE_APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_APP_STORE_CONNECT_PRIVATE_KEY_BASE64 }}
-          CERTIFICATE_PRIVATE_KEY: ${{ secrets.APPLE_CERTIFICATE_PRIVATE_KEY }}
+          CERTIFICATE_PRIVATE_KEY: ${{ secrets.APPLE_MAC_DEVELOPER_ID_CERT_PRIVATE_KEY }}
         run: |
           export APP_STORE_CONNECT_PRIVATE_KEY="$(printf '%s' "${APP_STORE_CONNECT_PRIVATE_KEY_BASE64}" | /usr/bin/base64 -d)"
           app-store-connect fetch-signing-files "${BUNDLE_ID}" \
