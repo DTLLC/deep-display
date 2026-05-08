@@ -19,7 +19,7 @@ This script:
 
 Hard policy:
 - releases require a clean worktree, including untracked files
-- releases integrate origin before bumping so CI tap updates are included
+- releases integrate origin before bumping so release commits start from the latest branch state
 - --dry-run reports the stop condition without mutating anything
 - release waiting is handled by gh run watch
 EOF
@@ -227,7 +227,7 @@ Release workflow wait: enabled
 
 Would run:
   git fetch origin ${current_branch}
-  git merge origin/${current_branch} # when origin has CI tap updates
+  git merge origin/${current_branch} # when origin has new commits
   ./scripts/bump_version.sh ${bump_kind}
   git add VERSION
   git commit -m "Bump version to ${next_version}"

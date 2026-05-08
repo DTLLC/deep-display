@@ -28,6 +28,7 @@ jobs:
           release_title="Deep Display ${version} (${build_version})"
           dmg_name="Deep-Display-${version}+${build_version}.dmg"
           latest_dmg_name="Deep-Display-latest.dmg"
+          release_asset_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/${latest_dmg_name}"
           {
             echo "DEEPDISPLAY_MARKETING_VERSION=${version}"
             echo "DEEPDISPLAY_BUILD_VERSION=${build_version}"
@@ -35,6 +36,7 @@ jobs:
             echo "RELEASE_TITLE=${release_title}"
             echo "RELEASE_DMG_NAME=${dmg_name}"
             echo "LATEST_RELEASE_DMG_NAME=${latest_dmg_name}"
+            echo "RELEASE_ASSET_URL=${release_asset_url}"
           } >> "${GITHUB_ENV}"
 
       - name: Make scripts executable
@@ -101,13 +103,10 @@ jobs:
       - name: Prepare Homebrew DMG alias
         run: cp ".dist/${RELEASE_DMG_NAME}" ".dist/${LATEST_RELEASE_DMG_NAME}"
 
-      - name: Stamp Homebrew cask
+      - name: Calculate Homebrew SHA
         run: |
           cask_sha256="$(shasum -a 256 ".dist/${LATEST_RELEASE_DMG_NAME}" | awk '{print $1}')"
-          ./scripts/update_cask.sh \
-            "${DEEPDISPLAY_MARKETING_VERSION}" \
-            "${DEEPDISPLAY_BUILD_VERSION}" \
-            "${cask_sha256}"
+          echo "HOMEBREW_CASK_SHA256=${cask_sha256}" >> "${GITHUB_ENV}"
 
       - name: Create GitHub release
         env:
@@ -120,24 +119,17 @@ jobs:
             ".dist/${RELEASE_DMG_NAME}" \
             ".dist/${LATEST_RELEASE_DMG_NAME}"
 
-      - name: Publish Homebrew cask update
+      - name: Notify Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B main origin/main
-          cask_sha256="$(shasum -a 256 ".dist/${LATEST_RELEASE_DMG_NAME}" | awk '{print $1}')"
-          ./scripts/update_cask.sh \
-            "${DEEPDISPLAY_MARKETING_VERSION}" \
-            "${DEEPDISPLAY_BUILD_VERSION}" \
-            "${cask_sha256}"
-          if git diff --quiet -- Casks/deep-display.rb; then
-            echo "Homebrew cask is already current."
-            exit 0
-          fi
-          git add Casks/deep-display.rb
-          git commit -m "Update Homebrew cask to ${DEEPDISPLAY_MARKETING_VERSION}+${DEEPDISPLAY_BUILD_VERSION}"
-          git push origin main
+          gh api repos/DTLLC/homebrew-tap/dispatches \
+            -f event_type=update-cask \
+            -f client_payload[app]=deep-display \
+            -f client_payload[version]="${DEEPDISPLAY_MARKETING_VERSION}" \
+            -f client_payload[build]="${DEEPDISPLAY_BUILD_VERSION}" \
+            -f client_payload[sha256]="${HOMEBREW_CASK_SHA256}" \
+            -f client_payload[url]="${RELEASE_ASSET_URL}"
 
       - name: Delete superseded patch releases
         env:
